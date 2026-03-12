@@ -1,0 +1,20 @@
+# Development files
+src/
+test/
+scripts/
+*.ts
+!*.d.ts
+
+# Configuration
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+
+# Documentation
+STRING-WIDTH-PLAN.md
+
+# Other
+.DS_Store
+node_modules/
+coverage/
+*.log
