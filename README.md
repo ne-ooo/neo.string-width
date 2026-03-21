@@ -4,30 +4,29 @@
 
 Calculate the visual width of strings for terminal/console output. Correctly handles Unicode, emoji, CJK characters, and ANSI escape codes.
 
-[![npm version](https://img.shields.io/npm/v/@lpm.dev/neo.string-width.svg)](https://www.npmjs.com/package/@lpm.dev/neo.string-width)
-[![Bundle size](https://img.shields.io/bundlephobia/minzip/@lpm.dev/neo.string-width)](https://bundlephobia.com/package/@lpm.dev/neo.string-width)
-[![Test coverage](https://img.shields.io/badge/coverage-99.55%25-brightgreen)](./test)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-
 ---
 
 ## Why This Package?
 
 **🚀 Blazing Fast**
+
 - **6.8x faster** on ASCII text than string-width
 - **1.2x faster** on CJK text than string-width
 - **1.8x faster** on emoji than string-width
 
 **✨ Feature Rich**
+
 - Built-in helper functions: truncate, pad, slice, split by width
 - Full TypeScript support with strict types
 - Tree-shakeable (import only what you need)
 
 **🎯 Zero Dependencies**
+
 - Only dependency: `@lpm.dev/neo.ansi` (itself zero-dep)
 - Smaller bundle than alternatives
 
 **💯 Correct**
+
 - Unicode 16 compliant
 - Handles all edge cases (emoji with skin tones, ZWJ sequences, combining marks)
 - 328 comprehensive tests (99.55% coverage)
@@ -45,22 +44,22 @@ lpm install @lpm.dev/neo.string-width
 ## Quick Start
 
 ```typescript
-import stringWidth from '@lpm.dev/neo.string-width'
+import stringWidth from "@lpm.dev/neo.string-width";
 
 // ASCII text
-stringWidth('hello')              // => 5
+stringWidth("hello"); // => 5
 
 // CJK characters (fullwidth)
-stringWidth('你好')                // => 4 (2 chars × 2 width)
+stringWidth("你好"); // => 4 (2 chars × 2 width)
 
 // Emoji
-stringWidth('👍')                  // => 2
+stringWidth("👍"); // => 2
 
 // ANSI colored text (codes are stripped)
-stringWidth('\x1b[31mRed\x1b[0m') // => 3
+stringWidth("\x1b[31mRed\x1b[0m"); // => 3
 
 // Mixed content
-stringWidth('Hello 你好 👍')       // => 11
+stringWidth("Hello 你好 👍"); // => 11
 ```
 
 ---
@@ -72,6 +71,7 @@ stringWidth('Hello 你好 👍')       // => 11
 Calculate the visual width of a string.
 
 **Parameters:**
+
 - `text` (string): Text to measure
 - `options` (object, optional):
   - `ambiguousIsNarrow` (boolean): Treat ambiguous-width characters as narrow (default: `true`)
@@ -82,11 +82,11 @@ Calculate the visual width of a string.
 **Returns:** number - Visual width in columns
 
 ```typescript
-import stringWidth from '@lpm.dev/neo.string-width'
+import stringWidth from "@lpm.dev/neo.string-width";
 
-stringWidth('hello')           // => 5
-stringWidth('你好世界')         // => 8
-stringWidth('👍👎')             // => 4
+stringWidth("hello"); // => 5
+stringWidth("你好世界"); // => 8
+stringWidth("👍👎"); // => 4
 ```
 
 ---
@@ -98,30 +98,31 @@ stringWidth('👍👎')             // => 4
 Truncate text to fit within a specified width.
 
 ```typescript
-import { truncateToWidth } from '@lpm.dev/neo.string-width'
+import { truncateToWidth } from "@lpm.dev/neo.string-width";
 
 // End truncation (default)
-truncateToWidth('Hello World', 8)
+truncateToWidth("Hello World", 8);
 // => 'Hello W…'
 
 // Start truncation
-truncateToWidth('Hello World', 8, { position: 'start' })
+truncateToWidth("Hello World", 8, { position: "start" });
 // => '…o World'
 
 // Middle truncation
-truncateToWidth('Hello World', 8, { position: 'middle' })
+truncateToWidth("Hello World", 8, { position: "middle" });
 // => 'Hel…orld'
 
 // Custom ellipsis
-truncateToWidth('Hello World', 8, { ellipsis: '...' })
+truncateToWidth("Hello World", 8, { ellipsis: "..." });
 // => 'Hello...'
 
 // Word boundary preference
-truncateToWidth('Hello World Test', 10, { wordBoundary: true })
+truncateToWidth("Hello World Test", 10, { wordBoundary: true });
 // => 'Hello…'
 ```
 
 **Options:**
+
 - `position`: 'end' | 'start' | 'middle' (default: 'end')
 - `ellipsis`: string (default: '…')
 - `wordBoundary`: boolean (default: false)
@@ -133,30 +134,31 @@ truncateToWidth('Hello World Test', 10, { wordBoundary: true })
 Pad text to reach a specified width.
 
 ```typescript
-import { padToWidth } from '@lpm.dev/neo.string-width'
+import { padToWidth } from "@lpm.dev/neo.string-width";
 
 // Right padding (default)
-padToWidth('Hello', 10)
+padToWidth("Hello", 10);
 // => 'Hello     '
 
 // Left padding
-padToWidth('Hello', 10, { align: 'right' })
+padToWidth("Hello", 10, { align: "right" });
 // => '     Hello'
 
 // Center padding
-padToWidth('Hello', 10, { align: 'center' })
+padToWidth("Hello", 10, { align: "center" });
 // => '  Hello   '
 
 // Custom pad character
-padToWidth('Hello', 10, { padChar: '.' })
+padToWidth("Hello", 10, { padChar: "." });
 // => 'Hello.....'
 
 // Works with CJK
-padToWidth('你好', 10)
+padToWidth("你好", 10);
 // => '你好      '
 ```
 
 **Options:**
+
 - `align`: 'left' | 'right' | 'center' (default: 'left')
 - `padChar`: string (default: ' ')
 
@@ -167,22 +169,22 @@ padToWidth('你好', 10)
 Slice text by visual width (like String.slice but width-aware).
 
 ```typescript
-import { sliceByWidth } from '@lpm.dev/neo.string-width'
+import { sliceByWidth } from "@lpm.dev/neo.string-width";
 
 // Basic slicing
-sliceByWidth('Hello World', 0, 5)
+sliceByWidth("Hello World", 0, 5);
 // => 'Hello'
 
 // Negative indices
-sliceByWidth('Hello World', -5)
+sliceByWidth("Hello World", -5);
 // => 'World'
 
 // Works with CJK (width-based, not character-based)
-sliceByWidth('你好世界', 0, 4)
+sliceByWidth("你好世界", 0, 4);
 // => '你好' (2 chars, width 4)
 
 // Mixed content
-sliceByWidth('Hello 你好', 0, 7)
+sliceByWidth("Hello 你好", 0, 7);
 // => 'Hello 你'
 ```
 
@@ -193,26 +195,27 @@ sliceByWidth('Hello 你好', 0, 7)
 Split text into chunks that fit within a maximum width.
 
 ```typescript
-import { splitByWidth } from '@lpm.dev/neo.string-width'
+import { splitByWidth } from "@lpm.dev/neo.string-width";
 
 // Basic splitting
-splitByWidth('Hello World', 5)
+splitByWidth("Hello World", 5);
 // => ['Hello', 'World']
 
 // CJK text
-splitByWidth('你好世界测试', 8)
+splitByWidth("你好世界测试", 8);
 // => ['你好世界', '测试']
 
 // Word boundary preference
-splitByWidth('Hello World Test', 10, { preferSplitOnSpace: true })
+splitByWidth("Hello World Test", 10, { preferSplitOnSpace: true });
 // => ['Hello', 'World Test']
 
 // Preserve whitespace
-splitByWidth('  Hello  ', 10, { preserveWhitespace: true })
+splitByWidth("  Hello  ", 10, { preserveWhitespace: true });
 // => ['  Hello  ']
 ```
 
 **Options:**
+
 - `preferSplitOnSpace`: boolean (default: true)
 - `preserveWhitespace`: boolean (default: false)
 
@@ -224,14 +227,14 @@ splitByWidth('  Hello  ', 10, { preserveWhitespace: true })
 
 Correctly handles all UAX #11 categories:
 
-| Category | Width | Examples |
-|----------|-------|----------|
-| **Fullwidth (F)** | 2 | ，、。！ |
-| **Wide (W)** | 2 | 你好世界 (CJK) |
-| **Halfwidth (H)** | 1 | ｱｲｳｴｵ |
-| **Narrow (Na)** | 1 | hello |
-| **Ambiguous (A)** | 1* | ±§¶ |
-| **Neutral (N)** | 1 | hello |
+| Category          | Width | Examples       |
+| ----------------- | ----- | -------------- |
+| **Fullwidth (F)** | 2     | ，、。！       |
+| **Wide (W)**      | 2     | 你好世界 (CJK) |
+| **Halfwidth (H)** | 1     | ｱｲｳｴｵ          |
+| **Narrow (Na)**   | 1     | hello          |
+| **Ambiguous (A)** | 1\*   | ±§¶            |
+| **Neutral (N)**   | 1     | hello          |
 
 \* Configurable via `ambiguousIsNarrow` option
 
@@ -254,15 +257,13 @@ Correctly handles all UAX #11 categories:
 
 ## Performance
 
-See [PERFORMANCE-OPTIMIZATION.md](./PERFORMANCE-OPTIMIZATION.md) for detailed analysis.
-
 ### Benchmarks vs string-width
 
-| Test Case | neo.string-width | string-width | Result |
-|-----------|------------------|--------------|--------|
-| **ASCII** | 17.4M ops/sec | 2.5M ops/sec | **6.8x faster** 🚀 |
-| **CJK** | 2.5M ops/sec | 2.1M ops/sec | **1.2x faster** ✨ |
-| **Emoji** | 3.0M ops/sec | 1.6M ops/sec | **1.8x faster** ⚡ |
+| Test Case | neo.string-width | string-width | Result             |
+| --------- | ---------------- | ------------ | ------------------ |
+| **ASCII** | 17.4M ops/sec    | 2.5M ops/sec | **6.8x faster** 🚀 |
+| **CJK**   | 2.5M ops/sec     | 2.1M ops/sec | **1.2x faster** ✨ |
+| **Emoji** | 3.0M ops/sec     | 1.6M ops/sec | **1.8x faster** ⚡ |
 
 **How?** Smart fast-path optimization that avoids expensive grapheme segmentation for simple text (80%+ of real-world cases).
 
@@ -281,13 +282,16 @@ Savings: ~20% smaller
 
 ```typescript
 // Import everything (13.70 KB)
-import stringWidth, { truncateToWidth, padToWidth } from '@lpm.dev/neo.string-width'
+import stringWidth, {
+  truncateToWidth,
+  padToWidth,
+} from "@lpm.dev/neo.string-width";
 
 // Import only stringWidth (~8 KB)
-import stringWidth from '@lpm.dev/neo.string-width'
+import stringWidth from "@lpm.dev/neo.string-width";
 
 // Import only helpers you need
-import { truncateToWidth } from '@lpm.dev/neo.string-width'
+import { truncateToWidth } from "@lpm.dev/neo.string-width";
 ```
 
 ---
@@ -302,16 +306,16 @@ import stringWidth, {
   type TruncateOptions,
   type PadOptions,
   type SliceOptions,
-  type SplitOptions
-} from '@lpm.dev/neo.string-width'
+  type SplitOptions,
+} from "@lpm.dev/neo.string-width";
 
 // Type-safe options
 const options: StringWidthOptions = {
   ambiguousIsNarrow: false,
-  emojiWidth: 1
-}
+  emojiWidth: 1,
+};
 
-stringWidth('text', options) // number
+stringWidth("text", options); // number
 ```
 
 ---
@@ -321,56 +325,56 @@ stringWidth('text', options) // number
 ### Terminal Table Formatting
 
 ```typescript
-import { padToWidth, truncateToWidth } from '@lpm.dev/neo.string-width'
+import { padToWidth, truncateToWidth } from "@lpm.dev/neo.string-width";
 
 function formatTableRow(name: string, value: string) {
-  const nameCol = padToWidth(truncateToWidth(name, 20), 20)
-  const valueCol = padToWidth(value, 30, { align: 'right' })
-  return `│ ${nameCol} │ ${valueCol} │`
+  const nameCol = padToWidth(truncateToWidth(name, 20), 20);
+  const valueCol = padToWidth(value, 30, { align: "right" });
+  return `│ ${nameCol} │ ${valueCol} │`;
 }
 
-formatTableRow('User Name', '你好世界')
+formatTableRow("User Name", "你好世界");
 // => '│ User Name            │                      你好世界 │'
 ```
 
 ### Progress Bar
 
 ```typescript
-import { padToWidth } from '@lpm.dev/neo.string-width'
+import { padToWidth } from "@lpm.dev/neo.string-width";
 
 function progressBar(percent: number, width: number = 40) {
-  const filled = Math.floor(width * percent / 100)
-  const bar = '█'.repeat(filled) + '░'.repeat(width - filled)
-  return `[${bar}] ${percent}%`
+  const filled = Math.floor((width * percent) / 100);
+  const bar = "█".repeat(filled) + "░".repeat(width - filled);
+  return `[${bar}] ${percent}%`;
 }
 
-progressBar(75, 20)
+progressBar(75, 20);
 // => '[███████████████░░░░] 75%'
 ```
 
 ### Text Wrapping
 
 ```typescript
-import { splitByWidth } from '@lpm.dev/neo.string-width'
+import { splitByWidth } from "@lpm.dev/neo.string-width";
 
 function wrapText(text: string, maxWidth: number): string[] {
-  return splitByWidth(text, maxWidth, { preferSplitOnSpace: true })
+  return splitByWidth(text, maxWidth, { preferSplitOnSpace: true });
 }
 
-wrapText('这是一段很长的中文文本需要被分割', 20)
+wrapText("这是一段很长的中文文本需要被分割", 20);
 // => ['这是一段很长的中文文', '本需要被分割']
 ```
 
 ### Truncate File Paths
 
 ```typescript
-import { truncateToWidth } from '@lpm.dev/neo.string-width'
+import { truncateToWidth } from "@lpm.dev/neo.string-width";
 
 function truncatePath(path: string, maxWidth: number) {
-  return truncateToWidth(path, maxWidth, { position: 'middle' })
+  return truncateToWidth(path, maxWidth, { position: "middle" });
 }
 
-truncatePath('/very/long/path/to/some/file.txt', 25)
+truncatePath("/very/long/path/to/some/file.txt", 25);
 // => '/very/long/…some/file.txt'
 ```
 
@@ -382,12 +386,12 @@ Drop-in replacement in most cases:
 
 ```typescript
 // Before
-import stringWidth from 'string-width'
-const width = stringWidth('text')
+import stringWidth from "string-width";
+const width = stringWidth("text");
 
 // After
-import stringWidth from '@lpm.dev/neo.string-width'
-const width = stringWidth('text')  // Same API!
+import stringWidth from "@lpm.dev/neo.string-width";
+const width = stringWidth("text"); // Same API!
 ```
 
 See [MIGRATION.md](./MIGRATION.md) for detailed migration guide.
