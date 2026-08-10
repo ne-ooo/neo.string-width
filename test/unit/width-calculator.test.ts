@@ -135,8 +135,7 @@ describe('stringWidth', () => {
     })
 
     it('should handle flag emoji', () => {
-      // Note: Regional indicators are handled as separate graphemes by Intl.Segmenter
-      // Each flag is 2 regional indicator code points, treated as wide characters (W)
+      // Regional-indicator pairs form one Unicode 16 grapheme.
       expect(stringWidth('🇺🇸')).toBeGreaterThanOrEqual(1) // One flag grapheme
       expect(stringWidth('🇺🇸🇬🇧')).toBeGreaterThanOrEqual(2) // Two flag graphemes
     })
@@ -219,6 +218,7 @@ describe('stringWidth', () => {
       const width3 = stringWidth(composed, { normalize: true })
       const width4 = stringWidth(decomposed, { normalize: true })
 
+      expect(width1).toBe(width2)
       expect(width3).toBe(width4)
     })
   })

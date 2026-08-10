@@ -165,8 +165,8 @@ describe('truncateToWidth', () => {
     })
 
     it('should handle newlines and tabs', () => {
-      expect(truncateToWidth('Hello\nWorld', 8)).toBe('Hello\nW…')
-      expect(truncateToWidth('Hello\tWorld', 8)).toBe('Hello\tW…')
+      expect(truncateToWidth('Hello\nWorld', 8)).toBe('Hello\nWo…')
+      expect(truncateToWidth('Hello\tWorld', 8)).toBe('Hello\tWo…')
     })
   })
 

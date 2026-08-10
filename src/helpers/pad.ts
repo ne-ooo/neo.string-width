@@ -1,88 +1,92 @@
-/**
- * Pad strings to a specific width
- *
- * Handles Unicode characters, emoji, and ANSI codes correctly
- */
-
+import { TokenizedText, assertWidth } from '../core/ansi-text.js'
+import { isPrintableAsciiOnly } from '../core/constants.js'
 import { stringWidth } from '../core/width-calculator.js'
 import type { PadOptions } from '../types.js'
 
-/**
- * Default options for padding
- */
 const DEFAULT_OPTIONS = {
   align: 'left' as const,
   padChar: ' ',
 }
 
-/**
- * Pad a string to fit a specified width
- *
- * @param text - String to pad
- * @param width - Target width in columns
- * @param options - Padding options
- * @returns Padded string
- *
- * @example
- * ```typescript
- * padToWidth('Hello', 10)
- * // => 'Hello     ' (left-aligned, default)
- *
- * padToWidth('Hello', 10, { align: 'right' })
- * // => '     Hello'
- *
- * padToWidth('Hello', 10, { align: 'center' })
- * // => '  Hello   '
- *
- * padToWidth('Hello', 10, { padChar: '.' })
- * // => 'Hello.....'
- *
- * padToWidth('你好', 10)
- * // => '你好      ' (CJK characters are width 2 each)
- * ```
- */
+function buildAsciiPadding(pattern: string, width: number): string {
+  return pattern.repeat(Math.ceil(width / pattern.length)).slice(0, width)
+}
+
+function buildPadding(
+  pattern: TokenizedText,
+  targetWidth: number
+): string {
+  const visibleIndices = pattern.tokens
+    .map((token, index) => ({ token, index }))
+    .filter(({ token }) => token.width > 0)
+
+  if (visibleIndices.length === 0 || targetWidth === 0) return ''
+
+  const result: string[] = []
+  let width = 0
+  let cursor = 0
+  while (width < targetWidth) {
+    const { index } = visibleIndices[cursor]!
+    const rendered = pattern.render(index, index + 1)
+    const renderedWidth = stringWidth(rendered, pattern.options)
+    if (width + renderedWidth > targetWidth) break
+    result.push(rendered)
+    width += renderedWidth
+    cursor = (cursor + 1) % visibleIndices.length
+  }
+  return result.join('')
+}
+
 export function padToWidth(
   text: string,
   width: number,
   options?: PadOptions
 ): string {
-  const opts = { ...DEFAULT_OPTIONS, ...options }
+  assertWidth(width, 'width', { allowZero: true })
+  const resolved = { ...DEFAULT_OPTIONS, ...options }
 
-  // Get current width
-  const currentWidth = stringWidth(text)
-
-  // If already at or exceeds target width, return as-is
-  if (currentWidth >= width) {
-    return text
-  }
-
-  // Calculate padding needed
-  const padWidth = width - currentWidth
-  const padCharWidth = stringWidth(opts.padChar)
-
-  // If padChar is wider than available space, can't pad properly
-  if (padCharWidth === 0 || padWidth < padCharWidth) {
-    return text
-  }
-
-  // Calculate number of pad characters needed
-  const padCount = Math.floor(padWidth / padCharWidth)
-  const padding = opts.padChar.repeat(padCount)
-
-  switch (opts.align) {
-    case 'right':
-      return padding + text
-
-    case 'center': {
-      const leftPadCount = Math.floor(padCount / 2)
-      const rightPadCount = padCount - leftPadCount
-      const leftPad = opts.padChar.repeat(leftPadCount)
-      const rightPad = opts.padChar.repeat(rightPadCount)
-      return leftPad + text + rightPad
+  if (
+    isPrintableAsciiOnly(text) &&
+    resolved.padChar.length > 0 &&
+    isPrintableAsciiOnly(resolved.padChar)
+  ) {
+    if (text.length >= width) return text
+    const paddingWidth = width - text.length
+    if (resolved.align === 'right') {
+      return buildAsciiPadding(resolved.padChar, paddingWidth) + text
     }
-
-    case 'left':
-    default:
-      return text + padding
+    if (resolved.align === 'center') {
+      const leftWidth = Math.floor(paddingWidth / 2)
+      return (
+        buildAsciiPadding(resolved.padChar, leftWidth) +
+        text +
+        buildAsciiPadding(resolved.padChar, paddingWidth - leftWidth)
+      )
+    }
+    return text + buildAsciiPadding(resolved.padChar, paddingWidth)
   }
+
+  const source = new TokenizedText(text, resolved)
+  if (source.width >= width) return text
+
+  const pattern = new TokenizedText(resolved.padChar, resolved)
+  if (pattern.width === 0) return text
+
+  const safeText = source.render()
+  const safeWidth = stringWidth(safeText, resolved)
+  if (safeWidth >= width) return safeText
+  const paddingWidth = width - safeWidth
+
+  if (resolved.align === 'right') {
+    return buildPadding(pattern, paddingWidth) + safeText
+  }
+  if (resolved.align === 'center') {
+    const leftWidth = Math.floor(paddingWidth / 2)
+    return (
+      buildPadding(pattern, leftWidth) +
+      safeText +
+      buildPadding(pattern, paddingWidth - leftWidth)
+    )
+  }
+  return safeText + buildPadding(pattern, paddingWidth)
 }

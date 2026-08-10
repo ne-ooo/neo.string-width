@@ -238,8 +238,8 @@ describe('Real-world use cases', () => {
 
     it('should handle whitespace-only strings', () => {
       expect(stringWidth('   ')).toBe(3)
-      expect(stringWidth('\t')).toBe(1)
-      expect(stringWidth('\n')).toBe(1)
+      expect(stringWidth('\t')).toBe(0)
+      expect(stringWidth('\n')).toBe(0)
     })
 
     it('should handle very long strings', () => {

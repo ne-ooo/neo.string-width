@@ -1,6 +1,6 @@
 # @lpm.dev/neo.string-width
 
-> Modern, ultra-fast string width calculator with zero dependencies
+> Unicode 16 string-width utilities with a small, auditable dependency surface
 
 Calculate the visual width of strings for terminal/console output. Correctly handles Unicode, emoji, CJK characters, and ANSI escape codes.
 
@@ -8,11 +8,11 @@ Calculate the visual width of strings for terminal/console output. Correctly han
 
 ## Why This Package?
 
-**🚀 Blazing Fast**
+**Measured Performance**
 
-- **6.8x faster** on ASCII text than string-width
-- **1.2x faster** on CJK text than string-width
-- **1.8x faster** on emoji than string-width
+- Benchmarked against the real, exact-pinned `string-width` 8.2.2 package
+- Comparison workloads verify equal output before timing begins
+- 1.23x the batch throughput in the recorded environment; results vary by input
 
 **✨ Feature Rich**
 
@@ -20,16 +20,16 @@ Calculate the visual width of strings for terminal/console output. Correctly han
 - Full TypeScript support with strict types
 - Tree-shakeable (import only what you need)
 
-**🎯 Zero Dependencies**
+**🎯 Small Dependency Surface**
 
-- Only dependency: `@lpm.dev/neo.ansi` (itself zero-dep)
-- Smaller bundle than alternatives
+- One pinned runtime dependency: `@lpm.dev/neo.ansi`
+- Exact dependency versions and a committed LPM lockfile
 
 **💯 Correct**
 
 - Unicode 16 compliant
 - Handles all edge cases (emoji with skin tones, ZWJ sequences, combining marks)
-- 328 comprehensive tests (99.55% coverage)
+- Complete generated Unicode 16 property tables and 343 regression tests
 
 ---
 
@@ -80,6 +80,8 @@ Calculate the visual width of a string.
   - `normalize` (boolean): Normalize text before measuring (default: `false`)
 
 **Returns:** number - Visual width in columns
+
+Control characters and default-ignorable code points have width 0. Tabs do not have a fixed width because their display depends on the current tab stop.
 
 ```typescript
 import stringWidth from "@lpm.dev/neo.string-width";
@@ -188,6 +190,8 @@ sliceByWidth("Hello 你好", 0, 7);
 // => 'Hello 你'
 ```
 
+Only graphemes fully contained in the requested column range are returned. Set `ellipsis` in the options to mark a wide grapheme that crosses a boundary.
+
 ---
 
 ### `splitByWidth(text, maxWidth, options?)`
@@ -218,6 +222,8 @@ splitByWidth("  Hello  ", 10, { preserveWhitespace: true });
 
 - `preferSplitOnSpace`: boolean (default: true)
 - `preserveWhitespace`: boolean (default: false)
+
+Width arguments must be finite safe integers. Padding and truncation accept zero; `splitByWidth` requires `maxWidth > 0` and throws when one indivisible grapheme is wider than the requested line.
 
 ---
 
@@ -257,37 +263,36 @@ Correctly handles all UAX #11 categories:
 
 ## Performance
 
-### Benchmarks vs string-width
+### Benchmarks vs string-width 8.2.2
 
-| Test Case | neo.string-width | string-width | Result             |
-| --------- | ---------------- | ------------ | ------------------ |
-| **ASCII** | 17.4M ops/sec    | 2.5M ops/sec | **6.8x faster** 🚀 |
-| **CJK**   | 2.5M ops/sec     | 2.1M ops/sec | **1.2x faster** ✨ |
-| **Emoji** | 3.0M ops/sec     | 1.6M ops/sec | **1.8x faster** ⚡ |
+| Test Case | neo.string-width | string-width | Relative result |
+| --------- | ---------------: | -----------: | --------------: |
+| Short ASCII | 20.83M ops/sec | 10.38M ops/sec | 2.01x |
+| Chinese | 318.85k ops/sec | 215.49k ops/sec | 1.48x |
+| Simple emoji | 540.80k ops/sec | 393.33k ops/sec | 1.37x |
+| Short ANSI | 3.29M ops/sec | 4.04M ops/sec | 0.81x |
+| Mixed batch | 4.25k ops/sec | 3.46k ops/sec | 1.23x |
 
-**How?** Smart fast-path optimization that avoids expensive grapheme segmentation for simple text (80%+ of real-world cases).
+Results were recorded on Node.js 26.5.0 and an Apple M5 Pro. ANSI-heavy
+workloads remain slower. See [BENCHMARKS.md](./BENCHMARKS.md) for the complete
+environment, workloads, limitations, and reproduction commands.
 
 ---
 
-## Bundle Size
+## Dependency Surface
 
-```
-@lpm.dev/neo.string-width: 13.70 KB (ESM)
-string-width + dependencies: ~17 KB
-
-Savings: ~20% smaller
-```
-
-**Tree-shakeable:** Import only what you need!
+The package has one exact-pinned runtime dependency, `@lpm.dev/neo.ansi`, for
+complete ANSI recognition. It publishes ESM and CJS builds and declares
+`sideEffects: false` for tree-shaking.
 
 ```typescript
-// Import everything (13.70 KB)
+// Import the core function and selected helpers
 import stringWidth, {
   truncateToWidth,
   padToWidth,
 } from "@lpm.dev/neo.string-width";
 
-// Import only stringWidth (~8 KB)
+// Import only stringWidth
 import stringWidth from "@lpm.dev/neo.string-width";
 
 // Import only helpers you need
@@ -400,13 +405,13 @@ See [MIGRATION.md](./MIGRATION.md) for detailed migration guide.
 
 ## How It Works
 
-1. **ANSI Stripping**: Remove escape codes using [@lpm.dev/neo.ansi](https://github.com/lpm-dev/neo-ansi)
-2. **ASCII Fast Path**: Return `text.length` for ASCII-only (6.8x speedup)
-3. **Simple Unicode Fast Path**: Code-point iteration for simple CJK/emoji (20x speedup)
-4. **Complex Grapheme Path**: Use Intl.Segmenter only when needed (ZWJ, combining marks)
-5. **Width Calculation**: East Asian Width lookup + emoji detection
+1. **ANSI Parsing**: Recognize 7-bit ESC and 8-bit C1 sequences with `@lpm.dev/neo.ansi`
+2. **ASCII Fast Path**: Return `text.length` for printable ASCII
+3. **Grapheme Segmentation**: Apply UAX #29 with generated Unicode 16 properties
+4. **Width Calculation**: Use complete East Asian Width and emoji-property tables
+5. **Safe Helpers**: Preserve grapheme boundaries and balance ANSI styles across output chunks
 
-**Smart Optimization**: 80%+ of real-world text uses fast paths, avoiding expensive operations.
+The Unicode tables are version-pinned, checksum-verified, and committed to the package. Results do not depend on the host's ICU version.
 
 ---
 
@@ -414,19 +419,19 @@ See [MIGRATION.md](./MIGRATION.md) for detailed migration guide.
 
 - ✅ Node.js 18+
 - ✅ Modern browsers (Chrome 87+, Firefox 90+, Safari 14.1+)
-- ✅ Requires `Intl.Segmenter` for complex grapheme clusters
+- ✅ No `Intl.Segmenter` dependency
 
 ---
 
 ## Testing
 
 ```bash
-npm test              # Run all tests
-npm run test:coverage # Coverage report (99.55%)
-npm run bench         # Performance benchmarks
+lpm run test           # Run all tests
+lpm run test:coverage  # Generate a coverage report
+lpm run bench          # Run benchmarks
 ```
 
-**Coverage**: 328 tests, 99.55% code coverage
+The suite includes Unicode, ANSI-safety, helper-boundary, and TypeScript contract tests.
 
 ---
 
@@ -438,9 +443,11 @@ MIT
 
 ## FAQ
 
-**Q: Why is this faster than string-width?**
+**Q: Why can this be faster than string-width?**
 
-A: Smart fast-path optimization. We avoid expensive `Intl.Segmenter` for 80%+ of text by detecting when it's not needed (simple CJK, simple emoji, ASCII).
+A: Printable ASCII uses a fast path. Unicode measurement streams pinned lookup
+tables without depending on host ICU data. Performance varies by input; see the
+reproducible benchmark report, including the slower ANSI cases.
 
 **Q: Is this a drop-in replacement for string-width?**
 
@@ -452,8 +459,8 @@ A: Full support including skin tones (👍🏻), ZWJ sequences (👨‍👩‍�
 
 **Q: Does it work in browsers?**
 
-A: Yes! Requires browsers with `Intl.Segmenter` support (Chrome 87+, Firefox 90+, Safari 14.1+).
+A: Yes. Grapheme segmentation is included, so browser behavior does not depend on `Intl.Segmenter` or the host ICU version.
 
 **Q: Why create another string-width package?**
 
-A: To provide better performance, built-in helpers, zero dependencies, and TypeScript-first design.
+A: To provide deterministic Unicode data, built-in helpers, a small dependency surface, and TypeScript-first design.

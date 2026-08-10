@@ -36,7 +36,7 @@ describe('sliceByWidth', () => {
 
     it('should handle partial CJK character positions', () => {
       expect(sliceByWidth('你好世界', 2, 6)).toBe('好世')
-      expect(sliceByWidth('你好世界', 1, 5)).toBe('好世')
+      expect(sliceByWidth('你好世界', 1, 5)).toBe('好')
     })
 
     it('should handle mixed ASCII and CJK', () => {

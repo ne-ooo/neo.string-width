@@ -1,6 +1,6 @@
 ---
 name: getting-started
-description: How to use neo.string-width — stringWidth() for visual column width, truncateToWidth/padToWidth/sliceByWidth/splitByWidth helpers, GraphemeIterator, getEastAsianWidth(), options (ambiguousIsNarrow, countAnsiEscapeCodes, emojiWidth, normalize), CJK fullwidth, emoji, ANSI stripping, fast-path ASCII optimization, TypeScript, zero-dependency
+description: How to use neo.string-width — stringWidth() for visual column width, truncateToWidth/padToWidth/sliceByWidth/splitByWidth helpers, GraphemeIterator, getEastAsianWidth(), options (ambiguousIsNarrow, countAnsiEscapeCodes, emojiWidth, normalize), CJK fullwidth, emoji, ANSI stripping, fast-path ASCII optimization, TypeScript, small dependency surface
 version: "1.0.0"
 globs:
   - "**/*.ts"
@@ -13,7 +13,7 @@ globs:
 
 ## Overview
 
-neo.string-width calculates the visual column width of strings — accounting for CJK fullwidth characters (width 2), emoji (width 2), ANSI escape codes (width 0), combining marks, ZWJ sequences, and variation selectors. 10-20% faster than `string-width`, 2-3x faster on ASCII-only strings. TypeScript-first, zero-dependency, ESM + CJS.
+neo.string-width calculates the visual column width of strings — accounting for CJK fullwidth characters (width 2), emoji (width 2), ANSI escape codes (width 0), combining marks, ZWJ sequences, and variation selectors. It is TypeScript-first, publishes ESM and CJS, and has one pinned runtime dependency. Performance varies by input; the repository benchmark compares equal outputs with the real, exact-pinned `string-width` package.
 
 ## Quick Start
 
@@ -222,15 +222,15 @@ import {
 
 The library uses a tiered processing strategy:
 
-1. **ASCII fast-path**: Pure ASCII strings use `text.length` directly — 2-3x faster
-2. **CJK path**: Strings with CJK but no complex graphemes use codepoint iteration
-3. **Complex path**: Strings with emoji/ZWJ/combining marks use `Intl.Segmenter`
+1. **ASCII fast-path**: Printable ASCII strings use `text.length` directly
+2. **Unicode 16 segmentation**: Other text uses the package's UAX #29 implementation
+3. **Generated lookups**: East Asian Width, emoji, marks, and controls use pinned Unicode 16 tables
 
 ```typescript
 // All return correct results, but performance varies:
 stringWidth('hello world')          // Fast path (ASCII)
-stringWidth('你好世界')              // CJK path
-stringWidth('Hello 👨‍👩‍👧‍👦 World')  // Complex path (ZWJ emoji)
+stringWidth('你好世界')              // Unicode 16 path
+stringWidth('Hello 👨‍👩‍👧‍👦 World')  // Unicode 16 path (ZWJ emoji)
 ```
 
 ## TypeScript Types

@@ -23,7 +23,7 @@ describe('Compatibility with string-width', () => {
     it('should match for whitespace', () => {
       expect(stringWidth(' ')).toBe(1)
       expect(stringWidth('  ')).toBe(2)
-      expect(stringWidth('\t')).toBe(1)
+      expect(stringWidth('\t')).toBe(0)
     })
   })
 
@@ -159,15 +159,15 @@ describe('Compatibility with string-width', () => {
     })
 
     it('should handle newlines', () => {
-      expect(stringWidth('a\nb')).toBe(3) // a + \n + b
+      expect(stringWidth('a\nb')).toBe(2) // Controls have no fixed column width
     })
 
     it('should handle tabs', () => {
-      expect(stringWidth('a\tb')).toBe(3) // a + \t + b
+      expect(stringWidth('a\tb')).toBe(2)
     })
 
     it('should handle carriage returns', () => {
-      expect(stringWidth('a\rb')).toBe(3)
+      expect(stringWidth('a\rb')).toBe(2)
     })
   })
 

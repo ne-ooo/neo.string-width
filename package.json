@@ -1,41 +1,49 @@
 {
   "name": "@lpm.dev/neo.string-width",
   "version": "1.0.0",
-  "description": "Modern, zero-dependency string width calculator - beats string-width by 10-20%, 2-3x faster on ASCII",
+  "description": "Unicode 16 string-width utilities for terminal text, emoji, CJK, and ANSI sequences",
+  "packageManager": "lpm@0.73.0",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    ".lpm",
+    ".lpm/skills",
     "README.md",
     "CHANGELOG.md",
-    "MIGRATION.md",
     "BENCHMARKS.md",
-    "PERFORMANCE-OPTIMIZATION.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "npm run generate-unicode-data && tsup",
-    "dev": "tsup --watch",
+    "build": "lpm pack",
+    "dev": "lpm pack -- --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.scripts.json --noEmit",
+    "audit": "lpm audit --fail-on=vuln && lpm audit signatures",
+    "check": "lpm run typecheck && lpm lint src test scripts && lpm run test && lpm run build",
     "clean": "rm -rf dist",
-    "generate-unicode-data": "tsx scripts/generate-unicode-data.ts",
-    "prepublishOnly": "npm run clean && npm run build && npm run test"
+    "generate-unicode-data": "tsc -p tsconfig.scripts.json && node .build/scripts/generate-unicode-data.js",
+    "publish:check": "lpm publish --check --min-score 80",
+    "prepublishOnly": "lpm run clean && lpm run audit && lpm run check"
   },
   "keywords": [
     "lpm",
@@ -50,7 +58,6 @@
     "fullwidth",
     "emoji",
     "ansi",
-    "zero-dependency",
     "typescript",
     "tree-shakeable"
   ],
@@ -64,18 +71,28 @@
     "url": "https://github.com/ne-ooo/neo.string-width/issues"
   },
   "homepage": "https://github.com/ne-ooo/neo.string-width#readme",
+  "publishConfig": {
+    "provenance": true
+  },
   "dependencies": {
-    "@lpm.dev/neo.ansi": "^1.0.0"
+    "@lpm.dev/neo.ansi": "1.1.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@vitest/coverage-v8": "^1.2.0",
-    "tsup": "^8.0.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0",
-    "vitest": "^1.2.0"
+    "@types/node": "22.20.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "tsdown": "0.22.14",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10",
+    "string-width": "8.2.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "lpm": ">=0.73.0"
+  },
+  "lpm": {
+    "autoInstallPeers": false,
+    "minimumReleaseAge": 259200,
+    "scriptPolicy": "deny",
+    "strictPeerDependencies": true
   }
 }

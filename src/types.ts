@@ -1,7 +1,7 @@
 /**
  * TypeScript type definitions for @lpm.dev/neo.string-width
  *
- * Modern, zero-dependency string width calculator
+ * Unicode 16 string width calculator with a pinned ANSI dependency
  */
 
 /**
@@ -69,7 +69,7 @@ export interface TruncateOptions extends StringWidthOptions {
   /**
    * Truncation indicator
    *
-   * @default '...'
+   * @default '…'
    */
   ellipsis?: string
 
@@ -102,11 +102,11 @@ export interface PadOptions extends StringWidthOptions {
   /**
    * Alignment for padding
    *
-   * - 'left': Pad on the left
-   * - 'right': Pad on the right (default)
+   * - 'left': Left-align text by padding on the right (default)
+   * - 'right': Right-align text by padding on the left
    * - 'center': Pad on both sides
    *
-   * @default 'right'
+   * @default 'left'
    */
   align?: 'left' | 'right' | 'center'
 
@@ -137,12 +137,16 @@ export interface SliceOptions extends StringWidthOptions {
  */
 export interface SplitOptions extends StringWidthOptions {
   /**
-   * Prefer word boundaries when splitting (default: false)
+   * Prefer splitting on whitespace instead of in the middle of a word.
    *
-   * When true, tries to break at word boundaries instead of
-   * mid-word. Falls back to character splitting if needed.
+   * @default true
+   */
+  preferSplitOnSpace?: boolean
+
+  /**
+   * Deprecated alias for `preferSplitOnSpace`.
    *
-   * @default false
+   * @deprecated Use `preferSplitOnSpace`.
    */
   wordBoundary?: boolean
 

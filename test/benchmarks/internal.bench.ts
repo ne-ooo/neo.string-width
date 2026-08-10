@@ -5,7 +5,12 @@
  */
 
 import { bench, describe } from 'vitest'
-import { stringWidth } from '../../src/index.js'
+import {
+  sliceByWidth,
+  splitByWidth,
+  stringWidth,
+  truncateToWidth,
+} from '../../src/index.js'
 import { getEastAsianWidth } from '../../src/core/unicode-data.js'
 import { GraphemeIterator } from '../../src/core/grapheme-iterator.js'
 import { isAsciiOnly, isZeroWidth } from '../../src/core/constants.js'
@@ -146,5 +151,23 @@ describe('Internal: Memory efficiency', () => {
     for (let i = 0; i < 100; i++) {
       stringWidth(longString)
     }
+  })
+})
+
+describe('Internal: Helper transformations', () => {
+  const ansiText =
+    '\x1b[31mThe quick brown fox jumps over the lazy dog\x1b[0m'
+  const unicodeText = 'Hello 你好 👨‍👩‍👧‍👦 안녕하세요 World'.repeat(4)
+
+  bench('truncateToWidth (ANSI)', () => {
+    truncateToWidth(ansiText, 24)
+  })
+
+  bench('sliceByWidth (Unicode)', () => {
+    sliceByWidth(unicodeText, 8, 42)
+  })
+
+  bench('splitByWidth (Unicode)', () => {
+    splitByWidth(unicodeText, 20)
   })
 })

@@ -108,11 +108,11 @@ describe('splitByWidth', () => {
     })
 
     it('should handle width of 0', () => {
-      expect(splitByWidth('Hello', 0)).toEqual(['Hello'])
+      expect(() => splitByWidth('Hello', 0)).toThrow(RangeError)
     })
 
     it('should handle negative width', () => {
-      expect(splitByWidth('Hello', -5)).toEqual(['Hello'])
+      expect(() => splitByWidth('Hello', -5)).toThrow(RangeError)
     })
 
     it('should handle width of 1', () => {
@@ -224,6 +224,7 @@ describe('splitByWidth', () => {
       const text = 'One Two Three Four Five'
       const manual = text.split(' ')
       const widthBased = splitByWidth(text, 100) // Large enough to fit all
+      expect(manual).toHaveLength(5)
       expect(widthBased).toEqual([text])
     })
 
