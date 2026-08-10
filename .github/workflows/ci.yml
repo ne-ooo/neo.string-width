@@ -37,7 +37,17 @@ jobs:
           echo "$HOME/.lpm/bin" >> "$GITHUB_PATH"
 
       - name: Exchange GitHub OIDC identity for LPM read access
-        run: lpm setup ci npmrc --oidc
+        shell: bash
+        run: |
+          lpm setup ci npmrc --oidc
+          lpm_oidc_token="$(sed -n 's#^//lpm\.dev/:_authToken=##p' .npmrc)"
+          if [[ -z "$lpm_oidc_token" ]]; then
+            echo "::error::LPM OIDC exchange did not produce a registry credential."
+            exit 1
+          fi
+          echo "::add-mask::$lpm_oidc_token"
+          printf 'LPM_TOKEN=%s\n' "$lpm_oidc_token" >> "$GITHUB_ENV"
+          rm -- .npmrc
 
       - name: Install the locked dependency graph
         run: lpm install --frozen-lockfile --no-skills --strict-integrity --policy=deny
