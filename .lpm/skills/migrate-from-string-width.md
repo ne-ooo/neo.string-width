@@ -1,6 +1,6 @@
 ---
 name: migrate-from-string-width
-description: Migration guide from string-width (sindresorhus) to neo.string-width — same stringWidth API, 10-20% faster (2-3x on ASCII), adds truncateToWidth/padToWidth/sliceByWidth/splitByWidth helpers, GraphemeIterator, getEastAsianWidth, emojiWidth option, countAnsiEscapeCodes option, normalize option, TypeScript native, ESM+CJS
+description: Migration guide from string-width (sindresorhus) to neo.string-width — compatible stringWidth API, measured performance, adds truncateToWidth/padToWidth/sliceByWidth/splitByWidth helpers, GraphemeIterator, getEastAsianWidth, emojiWidth option, countAnsiEscapeCodes option, normalize option, TypeScript native, ESM+CJS
 version: "1.0.0"
 globs:
   - "**/*.ts"
@@ -15,7 +15,7 @@ globs:
 
 | | string-width | neo.string-width |
 |---|-------------|-----------------|
-| **Performance** | Baseline | 10-20% faster (2-3x on ASCII) |
+| **Performance** | Baseline | Input-dependent; use the reproducible repository benchmark |
 | **Dependencies** | 3 (emoji-regex, strip-ansi, eastasianwidth) | 1 (neo.ansi) |
 | **TypeScript** | Built-in | Built-in |
 | **ESM** | ESM only | ESM + CJS |

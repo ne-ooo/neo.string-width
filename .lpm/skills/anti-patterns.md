@@ -226,7 +226,7 @@ import { sliceByWidth } from '@lpm.dev/neo.string-width'
 
 sliceByWidth('你好世界', 1, 3)
 // Expected: partial of '你' + partial of '好'
-// Actual: '好' — slice starts at next full character boundary
+// Actual: '' — neither wide character fits fully inside columns 1..3
 ```
 
 Correct:
@@ -247,3 +247,4 @@ const chunks = splitByWidth(text, 4)  // ['你好', '世界', '测试']
 ```
 
 `sliceByWidth` operates on visual column positions but never splits a multi-column character. If a start position falls in the middle of a wide character, it moves to the next character boundary.
+If an end position cuts a wide character, that character is excluded. Set `ellipsis` to show omitted partial boundaries.

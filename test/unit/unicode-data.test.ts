@@ -41,7 +41,7 @@ describe('Unicode Data', () => {
         expect(getEastAsianWidth(0x0061)).toBe('Na') // 'a'
         expect(getEastAsianWidth(0x0030)).toBe('Na') // '0'
         expect(getEastAsianWidth(0x0020)).toBe('Na') // space
-        expect(getEastAsianWidth(0x007f)).toBe('Na') // DEL
+        expect(getEastAsianWidth(0x007f)).toBe('N') // DEL
       })
     })
 
@@ -60,7 +60,7 @@ describe('Unicode Data', () => {
       })
 
       it('should return "W" for Hiragana and Katakana', () => {
-        expect(getEastAsianWidth(0x3040)).toBe('W') // Hiragana
+        expect(getEastAsianWidth(0x3041)).toBe('W') // Hiragana
         expect(getEastAsianWidth(0x30a0)).toBe('W') // Katakana
       })
     })
@@ -96,13 +96,13 @@ describe('Unicode Data', () => {
       })
 
       it('should return "A" for some symbols', () => {
-        expect(getEastAsianWidth(0x2600)).toBe('A') // ☀ (misc symbols)
+        expect(getEastAsianWidth(0x2600)).toBe('N') // ☀ (text presentation)
       })
     })
 
     describe('Wide characters', () => {
       it('should return "W" for ideographic space', () => {
-        expect(getEastAsianWidth(0x3000)).toBe('W') // 　 (ideographic space)
+        expect(getEastAsianWidth(0x3000)).toBe('F') // 　 (ideographic space)
       })
 
       it('should return "W" for CJK extension A', () => {
@@ -124,7 +124,7 @@ describe('Unicode Data', () => {
 
     describe('Edge cases', () => {
       it('should handle code point 0', () => {
-        expect(getEastAsianWidth(0x0000)).toBe('Na')
+        expect(getEastAsianWidth(0x0000)).toBe('N')
       })
 
       it('should handle high code points', () => {

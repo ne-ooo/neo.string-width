@@ -36,6 +36,11 @@ describe('Constants', () => {
       expect(VARIATION_SELECTOR_EMOJI).toBe(0xfe0f)
     })
   })
+
+  it('exports generated Unicode 16 ranges', () => {
+    expect(COMBINING_MARK_RANGES.length).toBeGreaterThan(100)
+    expect(EMOJI_RANGES.length).toBeGreaterThan(50)
+  })
 })
 
 describe('Helper Functions', () => {

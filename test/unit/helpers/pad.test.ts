@@ -112,7 +112,7 @@ describe('padToWidth', () => {
     })
 
     it('should handle negative width', () => {
-      expect(padToWidth('Hello', -5)).toBe('Hello')
+      expect(() => padToWidth('Hello', -5)).toThrow(RangeError)
     })
 
     it('should handle very large width', () => {

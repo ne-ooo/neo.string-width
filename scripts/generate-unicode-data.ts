@@ -1,175 +1,367 @@
 /**
- * Generate optimized Unicode East Asian Width lookup tables
+ * Generate deterministic Unicode 16 lookup tables.
  *
- * This script generates TypeScript code with East Asian Width data
- * from Unicode Character Database.
- *
- * For MVP, we include the most common ranges. In production, this would
- * download and parse the official Unicode data files.
- *
- * @see https://www.unicode.org/Public/UCD/latest/ucd/EastAsianWidth.txt
+ * This maintenance script downloads version-pinned Unicode data, verifies the
+ * published snapshot by SHA-256, and writes a stable TypeScript module. The
+ * generated module is committed; normal package builds do not access the
+ * network or rewrite source files.
  */
 
+import { createHash } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
+const UNICODE_VERSION = '16.0.0'
+const UCD_BASE = `https://www.unicode.org/Public/${UNICODE_VERSION}/ucd/`
+
+const SOURCES = {
+  eastAsianWidth: {
+    path: 'EastAsianWidth.txt',
+    sha256: '43adc76c0686a42cb370764eb8cfe2b2a45b10b855e5572a2db4a0eecce15d5b',
+  },
+  graphemeBreak: {
+    path: 'auxiliary/GraphemeBreakProperty.txt',
+    sha256: 'c29360bd6f7132811d701d29069541e827eb44bfc4c8fbde8c370d6982689dc1',
+  },
+  derivedCore: {
+    path: 'DerivedCoreProperties.txt',
+    sha256: '39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd',
+  },
+  emoji: {
+    path: 'emoji/emoji-data.txt',
+    sha256: 'f1365a5173eee18e1f98b240cdc492e84a25f1ce7e0c9d1094eb29c41a22696a',
+  },
+  generalCategory: {
+    path: 'extracted/DerivedGeneralCategory.txt',
+    sha256: '7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293',
+  },
+} as const
 
 type EastAsianWidth = 'F' | 'H' | 'W' | 'Na' | 'A' | 'N'
+type GraphemeBreakProperty =
+  | 'CR'
+  | 'LF'
+  | 'Control'
+  | 'Extend'
+  | 'ZWJ'
+  | 'Regional_Indicator'
+  | 'Prepend'
+  | 'SpacingMark'
+  | 'L'
+  | 'V'
+  | 'T'
+  | 'LV'
+  | 'LVT'
 
-interface UnicodeRange {
+interface Range<T extends string = string> {
   start: number
   end: number
-  category: EastAsianWidth
+  value: T
 }
 
-/**
- * East Asian Width ranges
- *
- * This is a curated subset of the full Unicode East Asian Width data.
- * Covers the most common characters for MVP.
- *
- * Full data: https://www.unicode.org/Public/UCD/latest/ucd/EastAsianWidth.txt
- */
-const EAST_ASIAN_WIDTH_RANGES: UnicodeRange[] = [
-  // ASCII and Latin-1 (Narrow)
-  { start: 0x0000, end: 0x00ff, category: 'Na' },
+async function fetchVerified(path: string, expectedHash: string): Promise<string> {
+  const response = await fetch(UCD_BASE + path)
+  if (!response.ok) {
+    throw new Error(`Failed to download ${path}: HTTP ${response.status}`)
+  }
 
-  // Halfwidth forms
-  { start: 0xff61, end: 0xffdc, category: 'H' },
-  { start: 0xffe8, end: 0xffee, category: 'H' },
-
-  // CJK Symbols and Punctuation (Wide)
-  { start: 0x3000, end: 0x303e, category: 'W' },
-
-  // Hiragana (Wide)
-  { start: 0x3040, end: 0x309f, category: 'W' },
-
-  // Katakana (Wide)
-  { start: 0x30a0, end: 0x30ff, category: 'W' },
-
-  // Hangul (Wide)
-  { start: 0x1100, end: 0x115f, category: 'W' },
-  { start: 0x2329, end: 0x232a, category: 'W' },
-  { start: 0xa960, end: 0xa97c, category: 'W' },
-  { start: 0xac00, end: 0xd7a3, category: 'W' },
-  { start: 0xd7b0, end: 0xd7c6, category: 'W' },
-  { start: 0xd7cb, end: 0xd7fb, category: 'W' },
-
-  // CJK Unified Ideographs (Wide)
-  { start: 0x4e00, end: 0x9fff, category: 'W' },
-
-  // CJK Extension A (Wide)
-  { start: 0x3400, end: 0x4dbf, category: 'W' },
-
-  // CJK Extension B-F (Wide)
-  { start: 0x20000, end: 0x2fffd, category: 'W' },
-  { start: 0x30000, end: 0x3fffd, category: 'W' },
-
-  // Fullwidth forms
-  { start: 0xff01, end: 0xff60, category: 'F' },
-  { start: 0xffe0, end: 0xffe6, category: 'F' },
-
-  // Box Drawing (Ambiguous)
-  { start: 0x2500, end: 0x257f, category: 'A' },
-
-  // Block Elements (Ambiguous)
-  { start: 0x2580, end: 0x259f, category: 'A' },
-
-  // Geometric Shapes (Ambiguous)
-  { start: 0x25a0, end: 0x25ff, category: 'A' },
-
-  // Miscellaneous Symbols (Ambiguous)
-  { start: 0x2600, end: 0x26ff, category: 'A' },
-]
-
-function generateTypeScriptCode(ranges: UnicodeRange[]): string {
-  // Sort ranges by start for binary search
-  const sorted = [...ranges].sort((a, b) => a.start - b.start)
-
-  const rangeLines = sorted
-    .map(
-      (r) =>
-        `  [0x${r.start.toString(16)}, 0x${r.end.toString(16)}, '${r.category}']`
+  const bytes = Buffer.from(await response.arrayBuffer())
+  const actualHash = createHash('sha256').update(bytes).digest('hex')
+  if (actualHash !== expectedHash) {
+    throw new Error(
+      `Checksum mismatch for ${path}: expected ${expectedHash}, received ${actualHash}`
     )
-    .join(',\n')
+  }
+  return bytes.toString('utf8')
+}
 
+function parseRange(value: string): [number, number] {
+  const [startText, endText = startText] = value.trim().split('..')
+  return [Number.parseInt(startText!, 16), Number.parseInt(endText!, 16)]
+}
+
+function parsePropertyFile<T extends string>(
+  text: string,
+  select: (fields: string[]) => T | undefined
+): Range<T>[] {
+  const ranges: Range<T>[] = []
+
+  for (const rawLine of text.split('\n')) {
+    const data = rawLine.split('#', 1)[0]!.trim()
+    if (!data) continue
+
+    const fields = data.split(';').map((field) => field.trim())
+    const value = select(fields)
+    if (value === undefined) continue
+
+    const [start, end] = parseRange(fields[0]!)
+    ranges.push({ start, end, value })
+  }
+
+  return mergeRanges(ranges)
+}
+
+function mergeRanges<T extends string>(ranges: Range<T>[]): Range<T>[] {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end)
+  const merged: Range<T>[] = []
+
+  for (const range of sorted) {
+    const previous = merged.at(-1)
+    if (
+      previous !== undefined &&
+      previous.value === range.value &&
+      previous.end + 1 === range.start
+    ) {
+      previous.end = range.end
+    } else {
+      merged.push({ ...range })
+    }
+  }
+
+  return merged
+}
+
+function formatNumber(value: number): string {
+  return `0x${value.toString(16)}`
+}
+
+function formatValuedRanges<T extends string>(ranges: Range<T>[]): string {
+  return ranges
+    .map(
+      ({ start, end, value }) =>
+        `  [${formatNumber(start)}, ${formatNumber(end)}, '${value}'],`
+    )
+    .join('\n')
+}
+
+function formatRanges(ranges: Range[]): string {
+  return ranges
+    .map(({ start, end }) => `  [${formatNumber(start)}, ${formatNumber(end)}],`)
+    .join('\n')
+}
+
+function generateModule(data: {
+  eastAsianWidth: Range<EastAsianWidth>[]
+  graphemeBreak: Range<GraphemeBreakProperty>[]
+  marks: Range[]
+  controls: Range[]
+  defaultIgnorable: Range[]
+  emojiPresentation: Range[]
+  emojiModifier: Range[]
+  extendedPictographic: Range[]
+  inCbLinker: Range[]
+  inCbConsonant: Range[]
+  inCbExtend: Range[]
+}): string {
   return `/**
- * Auto-generated Unicode East Asian Width data
- * Unicode Version: 16.0.0 (subset for MVP)
- * Generated: ${new Date().toISOString()}
+ * Unicode ${UNICODE_VERSION} property data.
  *
- * DO NOT EDIT MANUALLY
- * Run: npm run generate-unicode-data
- *
- * @see https://www.unicode.org/reports/tr11/
+ * AUTO-GENERATED by scripts/generate-unicode-data.ts. Do not edit manually.
+ * Source files are version-pinned and SHA-256 verified by the generator.
  */
 
 import type { EastAsianWidth } from '../types.js'
 
-/**
- * Compressed East Asian Width ranges
- *
- * Format: [startCodePoint, endCodePoint, category]
- * Sorted by startCodePoint for binary search O(log n) lookup.
- *
- * This is a curated subset covering the most common characters.
- * Full Unicode data would be ~500 ranges.
- */
-export const EAST_ASIAN_WIDTH_RANGES: readonly [
-  number,
-  number,
-  EastAsianWidth
-][] = [
-${rangeLines},
-] as const
+export type GraphemeBreakProperty =
+  | 'Other'
+  | 'CR'
+  | 'LF'
+  | 'Control'
+  | 'Extend'
+  | 'ZWJ'
+  | 'Regional_Indicator'
+  | 'Prepend'
+  | 'SpacingMark'
+  | 'L'
+  | 'V'
+  | 'T'
+  | 'LV'
+  | 'LVT'
 
-/**
- * Get East Asian Width category for a code point
- *
- * Uses binary search for O(log n) performance.
- *
- * @param codePoint - Unicode code point
- * @returns East Asian Width category
- *
- * @example
- * getEastAsianWidth(0x0041)  // 'Na' (Latin A)
- * getEastAsianWidth(0x4e00)  // 'W'  (CJK Ideograph)
- * getEastAsianWidth(0x3000)  // 'W'  (Ideographic Space)
- */
-export function getEastAsianWidth(codePoint: number): EastAsianWidth {
-  // Fast path: ASCII is always Narrow
-  if (codePoint < 0x80) return 'Na'
+export type IndicConjunctBreak = 'None' | 'Linker' | 'Consonant' | 'Extend'
 
-  // Binary search in ranges
+type Range = readonly [number, number]
+type ValuedRange<T extends string> = readonly [number, number, T]
+
+export const EAST_ASIAN_WIDTH_RANGES: readonly ValuedRange<EastAsianWidth>[] = [
+${formatValuedRanges(data.eastAsianWidth)}
+]
+
+export const GRAPHEME_BREAK_RANGES: readonly ValuedRange<Exclude<GraphemeBreakProperty, 'Other'>>[] = [
+${formatValuedRanges(data.graphemeBreak)}
+]
+
+export const MARK_RANGES: readonly Range[] = [
+${formatRanges(data.marks)}
+]
+
+export const CONTROL_RANGES: readonly Range[] = [
+${formatRanges(data.controls)}
+]
+
+export const DEFAULT_IGNORABLE_RANGES: readonly Range[] = [
+${formatRanges(data.defaultIgnorable)}
+]
+
+export const EMOJI_PRESENTATION_RANGES: readonly Range[] = [
+${formatRanges(data.emojiPresentation)}
+]
+
+export const EMOJI_MODIFIER_RANGES: readonly Range[] = [
+${formatRanges(data.emojiModifier)}
+]
+
+export const EXTENDED_PICTOGRAPHIC_RANGES: readonly Range[] = [
+${formatRanges(data.extendedPictographic)}
+]
+
+const INCB_LINKER_RANGES: readonly Range[] = [
+${formatRanges(data.inCbLinker)}
+]
+
+const INCB_CONSONANT_RANGES: readonly Range[] = [
+${formatRanges(data.inCbConsonant)}
+]
+
+const INCB_EXTEND_RANGES: readonly Range[] = [
+${formatRanges(data.inCbExtend)}
+]
+
+function lookupValue<T extends string>(
+  codePoint: number,
+  ranges: readonly ValuedRange<T>[]
+): T | undefined {
   let low = 0
-  let high = EAST_ASIAN_WIDTH_RANGES.length - 1
+  let high = ranges.length - 1
 
   while (low <= high) {
-    const mid = (low + high) >>> 1
-    const range = EAST_ASIAN_WIDTH_RANGES[mid]!
-
-    if (codePoint < range[0]) {
-      high = mid - 1
-    } else if (codePoint > range[1]) {
-      low = mid + 1
-    } else {
-      return range[2]
-    }
+    const middle = (low + high) >>> 1
+    const range = ranges[middle]!
+    if (codePoint < range[0]) high = middle - 1
+    else if (codePoint > range[1]) low = middle + 1
+    else return range[2]
   }
 
-  // Default to Neutral if not found
-  return 'N'
+  return undefined
+}
+
+function contains(codePoint: number, ranges: readonly Range[]): boolean {
+  let low = 0
+  let high = ranges.length - 1
+
+  while (low <= high) {
+    const middle = (low + high) >>> 1
+    const range = ranges[middle]!
+    if (codePoint < range[0]) high = middle - 1
+    else if (codePoint > range[1]) low = middle + 1
+    else return true
+  }
+
+  return false
+}
+
+export function getEastAsianWidth(codePoint: number): EastAsianWidth {
+  return lookupValue(codePoint, EAST_ASIAN_WIDTH_RANGES) ?? 'N'
+}
+
+export function getGraphemeBreakProperty(codePoint: number): GraphemeBreakProperty {
+  return lookupValue(codePoint, GRAPHEME_BREAK_RANGES) ?? 'Other'
+}
+
+export function getIndicConjunctBreak(codePoint: number): IndicConjunctBreak {
+  if (contains(codePoint, INCB_LINKER_RANGES)) return 'Linker'
+  if (contains(codePoint, INCB_CONSONANT_RANGES)) return 'Consonant'
+  if (contains(codePoint, INCB_EXTEND_RANGES)) return 'Extend'
+  return 'None'
+}
+
+export function isMark(codePoint: number): boolean {
+  return contains(codePoint, MARK_RANGES)
+}
+
+export function isControl(codePoint: number): boolean {
+  return contains(codePoint, CONTROL_RANGES)
+}
+
+export function isDefaultIgnorable(codePoint: number): boolean {
+  return contains(codePoint, DEFAULT_IGNORABLE_RANGES)
+}
+
+export function isEmojiPresentation(codePoint: number): boolean {
+  return contains(codePoint, EMOJI_PRESENTATION_RANGES)
+}
+
+export function isEmojiModifier(codePoint: number): boolean {
+  return contains(codePoint, EMOJI_MODIFIER_RANGES)
+}
+
+export function isExtendedPictographic(codePoint: number): boolean {
+  return contains(codePoint, EXTENDED_PICTOGRAPHIC_RANGES)
 }
 `
 }
 
-// Generate and write the file
-const code = generateTypeScriptCode(EAST_ASIAN_WIDTH_RANGES)
-const outputPath = join(__dirname, '../src/core/unicode-data.ts')
+async function main(): Promise<void> {
+  const entries = await Promise.all(
+    Object.entries(SOURCES).map(async ([name, source]) => [
+      name,
+      await fetchVerified(source.path, source.sha256),
+    ])
+  )
+  const source = Object.fromEntries(entries) as Record<keyof typeof SOURCES, string>
 
-writeFileSync(outputPath, code, 'utf-8')
+  const eastAsianWidth = parsePropertyFile<EastAsianWidth>(
+    source.eastAsianWidth,
+    (fields) => fields[1] as EastAsianWidth | undefined
+  )
+  const graphemeBreak = parsePropertyFile<GraphemeBreakProperty>(
+    source.graphemeBreak,
+    (fields) => fields[1] as GraphemeBreakProperty | undefined
+  )
+  const marks = parsePropertyFile(source.generalCategory, (fields) =>
+    fields[1] === 'Mn' || fields[1] === 'Mc' || fields[1] === 'Me' ? 'Mark' : undefined
+  )
+  const controls = parsePropertyFile(source.generalCategory, (fields) =>
+    fields[1] === 'Cc' ? 'Control' : undefined
+  )
+  const defaultIgnorable = parsePropertyFile(source.derivedCore, (fields) =>
+    fields[1] === 'Default_Ignorable_Code_Point' ? 'DefaultIgnorable' : undefined
+  )
+  const emojiPresentation = parsePropertyFile(source.emoji, (fields) =>
+    fields[1] === 'Emoji_Presentation' ? 'EmojiPresentation' : undefined
+  )
+  const emojiModifier = parsePropertyFile(source.emoji, (fields) =>
+    fields[1] === 'Emoji_Modifier' ? 'EmojiModifier' : undefined
+  )
+  const extendedPictographic = parsePropertyFile(source.emoji, (fields) =>
+    fields[1] === 'Extended_Pictographic' ? 'ExtendedPictographic' : undefined
+  )
+  const inCbLinker = parsePropertyFile(source.derivedCore, (fields) =>
+    fields[1] === 'InCB' && fields[2] === 'Linker' ? 'Linker' : undefined
+  )
+  const inCbConsonant = parsePropertyFile(source.derivedCore, (fields) =>
+    fields[1] === 'InCB' && fields[2] === 'Consonant' ? 'Consonant' : undefined
+  )
+  const inCbExtend = parsePropertyFile(source.derivedCore, (fields) =>
+    fields[1] === 'InCB' && fields[2] === 'Extend' ? 'Extend' : undefined
+  )
 
-console.log('✅ Generated Unicode data:', outputPath)
-console.log(`   ${EAST_ASIAN_WIDTH_RANGES.length} ranges`)
+  const output = generateModule({
+    eastAsianWidth,
+    graphemeBreak,
+    marks,
+    controls,
+    defaultIgnorable,
+    emojiPresentation,
+    emojiModifier,
+    extendedPictographic,
+    inCbLinker,
+    inCbConsonant,
+    inCbExtend,
+  })
+  const outputPath = join(process.cwd(), 'src/core/unicode-data.ts')
+  writeFileSync(outputPath, output, 'utf8')
+  console.log(`Generated Unicode ${UNICODE_VERSION} data at ${outputPath}`)
+}
+
+await main()

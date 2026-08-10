@@ -1,8 +1,7 @@
 /**
- * @lpm.dev/neo.string-width - Modern, zero-dependency string width calculator
+ * @lpm.dev/neo.string-width - Unicode 16 string width utilities
  *
- * Zero dependencies, beats string-width by 10-20%, 2-3x faster on ASCII
- * Tree-shakeable, TypeScript-first, Unicode 16 compliant
+ * One pinned ANSI dependency, tree-shakeable, TypeScript-first, Unicode 16
  *
  * @example
  * ```typescript

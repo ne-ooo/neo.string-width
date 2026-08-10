@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Security, tests, and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Install Node.js 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22"
+
+      - name: Install pinned LPM CLI
+        env:
+          LPM_INSTALL_VERSION: v0.73.0
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            https://raw.githubusercontent.com/lpm-dev/rust-client/0fcaf264a7de59894b609be280900ac10a8fe534/install.sh \
+            | sh
+          echo "$HOME/.lpm/bin" >> "$GITHUB_PATH"
+
+      - name: Exchange GitHub OIDC identity for LPM read access
+        shell: bash
+        run: |
+          lpm setup ci npmrc --oidc
+          lpm_oidc_token="$(sed -n 's#^//lpm\.dev/:_authToken=##p' .npmrc)"
+          if [[ -z "$lpm_oidc_token" ]]; then
+            echo "::error::LPM OIDC exchange did not produce a registry credential."
+            exit 1
+          fi
+          echo "::add-mask::$lpm_oidc_token"
+          printf 'LPM_TOKEN=%s\n' "$lpm_oidc_token" >> "$GITHUB_ENV"
+          rm -- .npmrc
+
+      - name: Install the locked dependency graph
+        run: lpm install --frozen-lockfile --no-skills --strict-integrity --policy=deny
+
+      - name: Verify registry signatures
+        run: lpm audit signatures
+
+      - name: Reject known vulnerabilities
+        run: lpm audit --fail-on=vuln
+
+      - name: Check types, lint, tests, and build
+        run: lpm run check
+
+      - name: Verify generated Unicode data
+        run: |
+          lpm run generate-unicode-data
+          git diff --exit-code -- src/core/unicode-data.ts
+
+      - name: Validate publish contents and scan for secrets
+        run: lpm run publish:check
