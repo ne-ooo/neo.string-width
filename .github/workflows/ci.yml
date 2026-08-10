@@ -2,25 +2,22 @@ name: CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     name: Security, tests, and package
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      LPM_TOKEN: ${{ secrets.LPM_TOKEN }}
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -38,6 +35,9 @@ jobs:
             https://raw.githubusercontent.com/lpm-dev/rust-client/0fcaf264a7de59894b609be280900ac10a8fe534/install.sh \
             | sh
           echo "$HOME/.lpm/bin" >> "$GITHUB_PATH"
+
+      - name: Exchange GitHub OIDC identity for LPM read access
+        run: lpm setup ci npmrc --oidc
 
       - name: Install the locked dependency graph
         run: lpm install --frozen-lockfile --no-skills --strict-integrity --policy=deny
