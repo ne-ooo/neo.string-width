@@ -144,10 +144,15 @@ function generateModule(data: {
   eastAsianWidth: Range<EastAsianWidth>[]
   graphemeBreak: Range<GraphemeBreakProperty>[]
   marks: Range[]
+  nonSpacingMarks: Range[]
+  spacingMarks: Range[]
   controls: Range[]
+  formats: Range[]
   defaultIgnorable: Range[]
+  emoji: Range[]
   emojiPresentation: Range[]
   emojiModifier: Range[]
+  emojiModifierBase: Range[]
   extendedPictographic: Range[]
   inCbLinker: Range[]
   inCbConsonant: Range[]
@@ -195,12 +200,28 @@ export const MARK_RANGES: readonly Range[] = [
 ${formatRanges(data.marks)}
 ]
 
+export const NONSPACING_MARK_RANGES: readonly Range[] = [
+${formatRanges(data.nonSpacingMarks)}
+]
+
+export const SPACING_MARK_RANGES: readonly Range[] = [
+${formatRanges(data.spacingMarks)}
+]
+
 export const CONTROL_RANGES: readonly Range[] = [
 ${formatRanges(data.controls)}
 ]
 
+export const FORMAT_RANGES: readonly Range[] = [
+${formatRanges(data.formats)}
+]
+
 export const DEFAULT_IGNORABLE_RANGES: readonly Range[] = [
 ${formatRanges(data.defaultIgnorable)}
+]
+
+export const EMOJI_PROPERTY_RANGES: readonly Range[] = [
+${formatRanges(data.emoji)}
 ]
 
 export const EMOJI_PRESENTATION_RANGES: readonly Range[] = [
@@ -209,6 +230,10 @@ ${formatRanges(data.emojiPresentation)}
 
 export const EMOJI_MODIFIER_RANGES: readonly Range[] = [
 ${formatRanges(data.emojiModifier)}
+]
+
+export const EMOJI_MODIFIER_BASE_RANGES: readonly Range[] = [
+${formatRanges(data.emojiModifierBase)}
 ]
 
 export const EXTENDED_PICTOGRAPHIC_RANGES: readonly Range[] = [
@@ -279,12 +304,28 @@ export function isMark(codePoint: number): boolean {
   return contains(codePoint, MARK_RANGES)
 }
 
+export function isNonSpacingMark(codePoint: number): boolean {
+  return contains(codePoint, NONSPACING_MARK_RANGES)
+}
+
+export function isSpacingMark(codePoint: number): boolean {
+  return contains(codePoint, SPACING_MARK_RANGES)
+}
+
 export function isControl(codePoint: number): boolean {
   return contains(codePoint, CONTROL_RANGES)
 }
 
+export function isFormat(codePoint: number): boolean {
+  return contains(codePoint, FORMAT_RANGES)
+}
+
 export function isDefaultIgnorable(codePoint: number): boolean {
   return contains(codePoint, DEFAULT_IGNORABLE_RANGES)
+}
+
+export function isEmoji(codePoint: number): boolean {
+  return contains(codePoint, EMOJI_PROPERTY_RANGES)
 }
 
 export function isEmojiPresentation(codePoint: number): boolean {
@@ -293,6 +334,10 @@ export function isEmojiPresentation(codePoint: number): boolean {
 
 export function isEmojiModifier(codePoint: number): boolean {
   return contains(codePoint, EMOJI_MODIFIER_RANGES)
+}
+
+export function isEmojiModifierBase(codePoint: number): boolean {
+  return contains(codePoint, EMOJI_MODIFIER_BASE_RANGES)
 }
 
 export function isExtendedPictographic(codePoint: number): boolean {
@@ -321,17 +366,32 @@ async function main(): Promise<void> {
   const marks = parsePropertyFile(source.generalCategory, (fields) =>
     fields[1] === 'Mn' || fields[1] === 'Mc' || fields[1] === 'Me' ? 'Mark' : undefined
   )
+  const nonSpacingMarks = parsePropertyFile(source.generalCategory, (fields) =>
+    fields[1] === 'Mn' || fields[1] === 'Me' ? 'NonSpacingMark' : undefined
+  )
+  const spacingMarks = parsePropertyFile(source.generalCategory, (fields) =>
+    fields[1] === 'Mc' ? 'SpacingMark' : undefined
+  )
   const controls = parsePropertyFile(source.generalCategory, (fields) =>
     fields[1] === 'Cc' ? 'Control' : undefined
   )
+  const formats = parsePropertyFile(source.generalCategory, (fields) =>
+    fields[1] === 'Cf' ? 'Format' : undefined
+  )
   const defaultIgnorable = parsePropertyFile(source.derivedCore, (fields) =>
     fields[1] === 'Default_Ignorable_Code_Point' ? 'DefaultIgnorable' : undefined
+  )
+  const emoji = parsePropertyFile(source.emoji, (fields) =>
+    fields[1] === 'Emoji' ? 'Emoji' : undefined
   )
   const emojiPresentation = parsePropertyFile(source.emoji, (fields) =>
     fields[1] === 'Emoji_Presentation' ? 'EmojiPresentation' : undefined
   )
   const emojiModifier = parsePropertyFile(source.emoji, (fields) =>
     fields[1] === 'Emoji_Modifier' ? 'EmojiModifier' : undefined
+  )
+  const emojiModifierBase = parsePropertyFile(source.emoji, (fields) =>
+    fields[1] === 'Emoji_Modifier_Base' ? 'EmojiModifierBase' : undefined
   )
   const extendedPictographic = parsePropertyFile(source.emoji, (fields) =>
     fields[1] === 'Extended_Pictographic' ? 'ExtendedPictographic' : undefined
@@ -350,10 +410,15 @@ async function main(): Promise<void> {
     eastAsianWidth,
     graphemeBreak,
     marks,
+    nonSpacingMarks,
+    spacingMarks,
     controls,
+    formats,
     defaultIgnorable,
+    emoji,
     emojiPresentation,
     emojiModifier,
+    emojiModifierBase,
     extendedPictographic,
     inCbLinker,
     inCbConsonant,

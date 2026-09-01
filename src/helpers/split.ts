@@ -1,108 +1,190 @@
 import { hasAnsi } from '@lpm.dev/neo.ansi'
 import {
+  AnsiTextView,
   TokenizedText,
+  assertSafeCountedAnsiHelperInput,
+  assertSafeAnsiExpansion,
   assertWidth,
+  finalizeAnsiOutput,
   isWhitespaceToken,
 } from '../core/ansi-text.js'
 import { GraphemeIterator } from '../core/grapheme-iterator.js'
 import {
   getGraphemeWidth,
   resolveStringWidthOptions,
+  stringWidth,
+  type ResolvedStringWidthOptions,
 } from '../core/width-calculator.js'
 import type { SplitOptions } from '../types.js'
 
-interface PlainToken {
-  readonly text: string
-  readonly width: number
-  readonly whitespace: boolean
+type ResolvedSplitOptions = ResolvedStringWidthOptions & {
+  readonly preferSplitOnSpace: boolean
+  readonly preserveWhitespace: boolean
 }
 
-function splitPlainTextByWidth(
+const SPLIT_RANGE_PAGE_SIZE = 16_384
+const MAX_POOLED_SPLIT_RANGE_PAGES = 64
+const MAX_ANSI_SPLIT_RANGES =
+  SPLIT_RANGE_PAGE_SIZE * MAX_POOLED_SPLIT_RANGE_PAGES
+const splitRangePagePool: Uint32Array[] = []
+
+function acquireSplitRangePage(rangePageSize: number): Uint32Array {
+  if (rangePageSize === SPLIT_RANGE_PAGE_SIZE) {
+    const pooled = splitRangePagePool.pop()
+    if (pooled !== undefined) return pooled
+  }
+  return new Uint32Array(rangePageSize * 2)
+}
+
+function releaseSplitRangePage(page: Uint32Array): void {
+  if (
+    page.length === SPLIT_RANGE_PAGE_SIZE * 2 &&
+    splitRangePagePool.length < MAX_POOLED_SPLIT_RANGE_PAGES
+  ) {
+    splitRangePagePool.push(page)
+  }
+}
+
+function resolveSplitOptions(options?: SplitOptions): ResolvedSplitOptions {
+  return {
+    ...resolveStringWidthOptions(options),
+    preferSplitOnSpace:
+      options?.preferSplitOnSpace ?? options?.wordBoundary ?? true,
+    preserveWhitespace: options?.preserveWhitespace ?? false,
+  }
+}
+
+function forEachPlainTextRangeByWidth(
   text: string,
   maxWidth: number,
-  options?: SplitOptions
-): string[] {
-  const preferSplitOnSpace =
-    options?.preferSplitOnSpace ?? options?.wordBoundary ?? true
-  const preserveWhitespace = options?.preserveWhitespace ?? false
-  const resolved = resolveStringWidthOptions(options)
-  const result: string[] = []
-  let buffer: PlainToken[] = []
+  options: ResolvedSplitOptions,
+  onRange: (start: number, end: number) => void
+): boolean {
+  const { preferSplitOnSpace, preserveWhitespace } = options
+  let bufferStart = -1
+  let bufferEnd = -1
   let bufferWidth = 0
-  let lastWhitespace = -1
+  let firstContentStart = -1
+  let lastContentEnd = -1
+  let lastWhitespaceStart = -1
+  let lastWhitespaceEnd = -1
+  let contentEndBeforeLastWhitespace = -1
+  let firstAfterLastWhitespaceStart = -1
+  let widthAfterLastWhitespace = 0
   let didSplit = false
 
-  const push = (tokens: readonly PlainToken[]): void => {
-    let start = 0
-    let end = tokens.length
-    if (!preserveWhitespace) {
-      while (start < end && tokens[start]!.whitespace) start++
-      while (end > start && tokens[end - 1]!.whitespace) end--
-    }
-    if (start < end) {
-      result.push(tokens.slice(start, end).map((token) => token.text).join(''))
-    }
+  const pushRange = (start: number, end: number): void => {
+    if (start >= 0 && end > start) onRange(start, end)
   }
 
-  const findWhitespace = (): number => {
-    for (let index = buffer.length - 1; index >= 0; index--) {
-      if (buffer[index]!.whitespace) return index
-    }
-    return -1
+  const pushBuffer = (): void => {
+    if (preserveWhitespace) pushRange(bufferStart, bufferEnd)
+    else pushRange(firstContentStart, lastContentEnd)
   }
 
-  for (const segment of new GraphemeIterator(text)) {
-    const width = getGraphemeWidth(segment, resolved)
+  const resetBuffer = (): void => {
+    bufferStart = -1
+    bufferEnd = -1
+    bufferWidth = 0
+    firstContentStart = -1
+    lastContentEnd = -1
+    lastWhitespaceStart = -1
+    lastWhitespaceEnd = -1
+    contentEndBeforeLastWhitespace = -1
+    firstAfterLastWhitespaceStart = -1
+    widthAfterLastWhitespace = 0
+  }
+
+  for (const segment of new GraphemeIterator(text).segments()) {
+    const width = getGraphemeWidth(segment.segment, options)
     if (width > maxWidth) {
       throw new RangeError(
         `maxWidth (${maxWidth}) is smaller than an indivisible grapheme (${width})`
       )
     }
-    const token: PlainToken = {
-      text: segment,
-      width,
-      whitespace: /^\s+$/u.test(segment),
-    }
+    const whitespace = /^\s+$/u.test(segment.segment)
     let consumedToken = false
 
-    while (bufferWidth + token.width > maxWidth) {
+    while (bufferWidth + width > maxWidth) {
       didSplit = true
-      if (token.whitespace) {
-        push(buffer)
-        buffer = preserveWhitespace ? [token] : []
-        bufferWidth = preserveWhitespace ? token.width : 0
-        lastWhitespace = preserveWhitespace ? 0 : -1
+      if (whitespace) {
+        pushBuffer()
+        resetBuffer()
+        if (preserveWhitespace) {
+          bufferStart = segment.index
+          bufferEnd = segment.end
+          bufferWidth = width
+          lastWhitespaceStart = segment.index
+          lastWhitespaceEnd = segment.end
+        }
         consumedToken = true
         break
       }
 
-      if (preferSplitOnSpace && lastWhitespace >= 0) {
-        push(
-          buffer.slice(
-            0,
-            preserveWhitespace ? lastWhitespace + 1 : lastWhitespace
-          )
-        )
-        buffer = buffer.slice(lastWhitespace + 1)
-        bufferWidth = buffer.reduce((total, item) => total + item.width, 0)
-        lastWhitespace = findWhitespace()
+      if (preferSplitOnSpace && lastWhitespaceStart >= 0) {
+        if (preserveWhitespace) {
+          pushRange(bufferStart, lastWhitespaceEnd)
+        } else {
+          pushRange(firstContentStart, contentEndBeforeLastWhitespace)
+        }
+
+        bufferStart = lastWhitespaceEnd
+        bufferWidth = widthAfterLastWhitespace
+        firstContentStart = firstAfterLastWhitespaceStart
+        if (firstContentStart < 0) lastContentEnd = -1
+        lastWhitespaceStart = -1
+        lastWhitespaceEnd = -1
+        contentEndBeforeLastWhitespace = -1
+        firstAfterLastWhitespaceStart = -1
+        widthAfterLastWhitespace = 0
         continue
       }
 
-      push(buffer)
-      buffer = []
-      bufferWidth = 0
-      lastWhitespace = -1
+      pushBuffer()
+      resetBuffer()
     }
 
     if (consumedToken) continue
-    buffer.push(token)
-    bufferWidth += token.width
-    if (token.whitespace) lastWhitespace = buffer.length - 1
+
+    if (bufferStart < 0) bufferStart = segment.index
+    bufferEnd = segment.end
+    bufferWidth += width
+    if (whitespace) {
+      lastWhitespaceStart = segment.index
+      lastWhitespaceEnd = segment.end
+      contentEndBeforeLastWhitespace = lastContentEnd
+      firstAfterLastWhitespaceStart = -1
+      widthAfterLastWhitespace = 0
+    } else {
+      if (firstContentStart < 0) firstContentStart = segment.index
+      lastContentEnd = segment.end
+      if (lastWhitespaceStart >= 0) {
+        widthAfterLastWhitespace += width
+        if (firstAfterLastWhitespaceStart < 0) {
+          firstAfterLastWhitespaceStart = segment.index
+        }
+      }
+    }
   }
 
+  if (!didSplit) return false
+  pushBuffer()
+  return true
+}
+
+function splitPlainTextByWidth(
+  text: string,
+  maxWidth: number,
+  options: ResolvedSplitOptions
+): string[] {
+  const result: string[] = []
+  const didSplit = forEachPlainTextRangeByWidth(
+    text,
+    maxWidth,
+    options,
+    (start, end) => result.push(text.slice(start, end))
+  )
   if (!didSplit) return [text]
-  push(buffer)
   return result
 }
 
@@ -133,6 +215,71 @@ function trimRange(
   return [start, end]
 }
 
+function splitSparseAnsiByWidth(
+  source: AnsiTextView,
+  originalText: string,
+  maxWidth: number,
+  options: ResolvedSplitOptions
+): string[] {
+  let renderedOutputLength = 0
+  const rangePageSize = Math.max(
+    1,
+    Math.min(SPLIT_RANGE_PAGE_SIZE, source.plainText.length)
+  )
+  const rangePages: Uint32Array[] = []
+  let rangeCount = 0
+
+  try {
+    const didSplit = forEachPlainTextRangeByWidth(
+      source.plainText,
+      maxWidth,
+      options,
+      (start, end) => {
+        if (rangeCount >= MAX_ANSI_SPLIT_RANGES) {
+          throw new RangeError('ANSI split output contains too many chunks')
+        }
+        const pageOffset = rangeCount % rangePageSize
+        if (pageOffset === 0) {
+          rangePages.push(acquireSplitRangePage(rangePageSize))
+        }
+        const page = rangePages[rangePages.length - 1]!
+        page[pageOffset * 2] = start
+        page[pageOffset * 2 + 1] = end
+        rangeCount++
+        const boundaries = {
+          includeStartSequences: start === 0,
+          includeEndSequences: true,
+        }
+        const renderedLength = source.renderLength(start, end, boundaries)
+        source.assertSafeRender(start, end, boundaries)
+        assertSafeAnsiExpansion(
+          source.sourceLength,
+          renderedOutputLength + renderedLength
+        )
+        renderedOutputLength += renderedLength
+      }
+    )
+    if (!didSplit) return [originalText]
+
+    const result: string[] = []
+    for (let index = 0; index < rangeCount; index++) {
+      const page = rangePages[Math.floor(index / rangePageSize)]!
+      const pageOffset = index % rangePageSize
+      const start = page[pageOffset * 2]!
+      const end = page[pageOffset * 2 + 1]!
+      result.push(
+        source.render(start, end, {
+          includeStartSequences: start === 0,
+          includeEndSequences: true,
+        })
+      )
+    }
+    return result
+  } finally {
+    for (const page of rangePages) releaseSplitRangePage(page)
+  }
+}
+
 export function splitByWidth(
   text: string,
   maxWidth: number,
@@ -141,14 +288,25 @@ export function splitByWidth(
   assertWidth(maxWidth, 'maxWidth', { allowZero: false })
   if (text === '') return []
 
-  const preferSplitOnSpace =
-    options?.preferSplitOnSpace ?? options?.wordBoundary ?? true
-  const preserveWhitespace = options?.preserveWhitespace ?? false
-  if (!hasAnsi(text)) return splitPlainTextByWidth(text, maxWidth, options)
+  const resolved = resolveSplitOptions(options)
+  const { preferSplitOnSpace, preserveWhitespace } = resolved
+  if (!hasAnsi(text)) return splitPlainTextByWidth(text, maxWidth, resolved)
 
-  const source = new TokenizedText(text, options)
-  if (source.width <= maxWidth) return [text]
+  if (resolved.countAnsiEscapeCodes) {
+    assertSafeCountedAnsiHelperInput(text)
+  }
 
+  const sparseSource = new AnsiTextView(text)
+  if (!resolved.countAnsiEscapeCodes) {
+    return splitSparseAnsiByWidth(sparseSource, text, maxWidth, resolved)
+  }
+
+  if (stringWidth(text, resolved) <= maxWidth) return [text]
+
+  const source = new TokenizedText(text, resolved, {
+    renderLengths: true,
+    visibleTokens: resolved.countAnsiEscapeCodes,
+  })
   for (const token of source.tokens) {
     if (token.width > maxWidth) {
       throw new RangeError(
@@ -158,6 +316,13 @@ export function splitByWidth(
   }
 
   const result: string[] = []
+  let renderedOutputLength = 0
+  const pushRenderedRange = (start: number, end: number): void => {
+    const renderedLength = source.renderLength(start, end)
+    assertSafeAnsiExpansion(text.length, renderedOutputLength + renderedLength)
+    result.push(finalizeAnsiOutput(source.render(start, end)))
+    renderedOutputLength += renderedLength
+  }
   const pushRange = (rangeStart: number, rangeEnd: number): void => {
     const [start, end] = preserveWhitespace
       ? [rangeStart, rangeEnd]
@@ -165,8 +330,14 @@ export function splitByWidth(
     if (start >= end) return
 
     if (!source.options.countAnsiEscapeCodes) {
-      result.push(source.render(start, end))
+      pushRenderedRange(start, end)
       return
+    }
+
+    if (!source.hasVisibleTokens(start, end)) {
+      throw new RangeError(
+        `maxWidth (${maxWidth}) cannot contain an ANSI-balanced grapheme`
+      )
     }
 
     let cursor = start
@@ -175,9 +346,7 @@ export function splitByWidth(
       while (
         candidateEnd > cursor &&
         (source.renderWidth(cursor, candidateEnd) > maxWidth ||
-          !source.tokens
-            .slice(cursor, candidateEnd)
-            .some((token) => !token.ansiOnly))
+          !source.hasVisibleTokens(cursor, candidateEnd))
       ) {
         candidateEnd--
       }
@@ -186,7 +355,7 @@ export function splitByWidth(
           `maxWidth (${maxWidth}) cannot contain an ANSI-balanced grapheme`
         )
       }
-      result.push(source.render(cursor, candidateEnd))
+      pushRenderedRange(cursor, candidateEnd)
       cursor = candidateEnd
     }
   }

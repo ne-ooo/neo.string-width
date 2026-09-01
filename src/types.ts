@@ -35,6 +35,11 @@ export interface StringWidthOptions {
    * Count ANSI escape codes in width (default: false)
    *
    * When false, ANSI codes are stripped before measuring.
+   * When this is true, width-changing helpers reject ANSI-bearing primary
+   * inputs longer than 4,096 UTF-16 code units or with more than 128 ANSI
+   * introducers. Helper strings such as `ellipsis` and `padChar` have the
+   * same limits even when they contain no ANSI codes.
+   * `stringWidth` itself does not apply that helper limit.
    *
    * @default false
    */
@@ -111,9 +116,10 @@ export interface PadOptions extends StringWidthOptions {
   align?: 'left' | 'right' | 'center'
 
   /**
-   * Character to use for padding
+   * Pattern to use for padding
    *
-   * Must be a single-width character (width = 1).
+   * The pattern can contain multiple graphemes or wide characters. Padding
+   * stops if the remaining columns cannot fit the next complete grapheme.
    *
    * @default ' '
    */
@@ -168,7 +174,7 @@ export interface SplitOptions extends StringWidthOptions {
 export interface Grapheme {
   /** The grapheme cluster string */
   text: string
-  /** Visual width (0, 1, or 2) */
+  /** Non-negative visual width in terminal columns; clusters can exceed 2. */
   width: number
   /** Start position in original string */
   start: number

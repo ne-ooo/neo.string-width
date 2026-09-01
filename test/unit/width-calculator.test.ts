@@ -148,8 +148,8 @@ describe('stringWidth', () => {
     it('should handle emoji with variation selector', () => {
       // Emoji presentation (VS16)
       expect(stringWidth('👍\ufe0f')).toBe(2)
-      // Text presentation (VS15)
-      expect(stringWidth('👍\ufe0e')).toBe(1)
+      // VS15 disables emoji promotion, then ordinary EAW still applies.
+      expect(stringWidth('👍\ufe0e')).toBe(2)
     })
   })
 

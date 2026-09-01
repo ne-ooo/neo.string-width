@@ -1,5 +1,11 @@
 import { hasAnsi } from '@lpm.dev/neo.ansi'
-import { TokenizedText, assertWidth } from '../core/ansi-text.js'
+import {
+  AnsiTextView,
+  TokenizedText,
+  assertSafeCountedAnsiHelperInput,
+  assertWidth,
+  finalizeAnsiOutput,
+} from '../core/ansi-text.js'
 import { isPrintableAsciiOnly } from '../core/constants.js'
 import { GraphemeIterator } from '../core/grapheme-iterator.js'
 import {
@@ -23,41 +29,49 @@ function slicePlainTextByWidth(
   if (start >= end) return ''
 
   const resolved = resolveStringWidthOptions(options)
-  const groups: string[] = []
-  const pendingZeroWidth: string[] = []
   let currentWidth = 0
+  let selectedStartOffset = -1
+  let selectedEndOffset = -1
   let firstStart = end
   let lastEnd = start
   let startWasPartial = false
   let endWasPartial = false
+  let scannedToEnd = true
 
-  for (const segment of new GraphemeIterator(text)) {
-    const width = getGraphemeWidth(segment, resolved)
+  for (const segment of new GraphemeIterator(text).segments()) {
+    const width = getGraphemeWidth(segment.segment, resolved)
     const tokenStart = currentWidth
     const tokenEnd = currentWidth + width
 
-    if (width === 0) {
-      if (groups.length > 0) pendingZeroWidth.push(segment)
-      continue
-    }
+    if (width === 0) continue
 
-    if (tokenStart >= end) break
+    if (tokenStart >= end) {
+      scannedToEnd = false
+      break
+    }
     currentWidth = tokenEnd
     if (tokenStart < start && tokenEnd > start) startWasPartial = true
     if (tokenStart < end && tokenEnd > end) endWasPartial = true
 
     if (tokenStart >= start && tokenEnd <= end) {
-      if (groups.length === 0) firstStart = tokenStart
-      groups.push(pendingZeroWidth.join('') + segment)
-      pendingZeroWidth.length = 0
+      if (selectedStartOffset < 0) {
+        selectedStartOffset = segment.index
+        firstStart = tokenStart
+      }
+      selectedEndOffset = segment.end
       lastEnd = tokenEnd
     }
   }
 
+  const effectiveEnd = scannedToEnd ? Math.min(end, currentWidth) : end
+  if (start >= effectiveEnd) return ''
+
   const ellipsis = new TokenizedText(options?.ellipsis ?? '', options)
-  const selectedWidth = end - start
-  const startGap = groups.length === 0 ? selectedWidth : firstStart - start
-  const endGap = groups.length === 0 ? selectedWidth : end - lastEnd
+  const selectedWidth = effectiveEnd - start
+  const startGap =
+    selectedStartOffset < 0 ? selectedWidth : firstStart - start
+  const endGap =
+    selectedStartOffset < 0 ? selectedWidth : effectiveEnd - lastEnd
   const prefix = startWasPartial
     ? renderFittingPrefix(ellipsis, startGap)
     : { text: '', width: 0 }
@@ -65,14 +79,20 @@ function slicePlainTextByWidth(
     ? renderFittingPrefix(ellipsis, endGap)
     : { text: '', width: 0 }
 
-  let content = groups.join('')
+  let content =
+    selectedStartOffset < 0
+      ? ''
+      : text.slice(selectedStartOffset, selectedEndOffset)
   let result = prefix.text + content + suffix.text
   if (prefix.text === '' && suffix.text === '') return result
 
   let resultWidth = stringWidth(result, resolved)
-  while (groups.length > 0 && resultWidth > selectedWidth) {
-    groups.pop()
-    content = groups.join('')
+  if (resultWidth <= selectedWidth) return result
+
+  const fallbackGroups = new GraphemeIterator(content).toArray()
+  while (fallbackGroups.length > 0 && resultWidth > selectedWidth) {
+    fallbackGroups.pop()
+    content = fallbackGroups.join('')
     result = prefix.text + content + suffix.text
     resultWidth = stringWidth(result, resolved)
   }
@@ -94,6 +114,81 @@ function renderFittingPrefix(text: TokenizedText, width: number): RenderedPrefix
   }
 }
 
+function sliceSparseAnsiByWidth(
+  source: AnsiTextView,
+  start: number,
+  end: number,
+  options?: SliceOptions
+): string {
+  if (isPrintableAsciiOnly(source.plainText)) {
+    const effectiveEnd = Math.min(end, source.plainText.length)
+    return start >= effectiveEnd ? '' : source.render(start, effectiveEnd)
+  }
+
+  const resolved = resolveStringWidthOptions(options)
+  let currentWidth = 0
+  let selectedStartOffset = -1
+  let selectedEndOffset = -1
+  let firstStart = end
+  let lastEnd = start
+  let selectedContentWidth = 0
+  let startWasPartial = false
+  let endWasPartial = false
+  let scannedToEnd = true
+
+  for (const segment of new GraphemeIterator(source.plainText).segments()) {
+    const width = getGraphemeWidth(segment.segment, resolved)
+    const tokenStart = currentWidth
+    const tokenEnd = currentWidth + width
+
+    if (width === 0) continue
+    if (tokenStart >= end) {
+      scannedToEnd = false
+      break
+    }
+    currentWidth = tokenEnd
+    if (tokenStart < start && tokenEnd > start) startWasPartial = true
+    if (tokenStart < end && tokenEnd > end) endWasPartial = true
+
+    if (tokenStart >= start && tokenEnd <= end) {
+      if (selectedStartOffset < 0) {
+        selectedStartOffset = segment.index
+        firstStart = tokenStart
+      }
+      selectedEndOffset = segment.end
+      lastEnd = tokenEnd
+      selectedContentWidth += width
+    }
+  }
+
+  const effectiveEnd = scannedToEnd ? Math.min(end, currentWidth) : end
+  if (start >= effectiveEnd) return ''
+
+  const ellipsis = new TokenizedText(options?.ellipsis ?? '', options)
+  const selectedWidth = effectiveEnd - start
+  const startGap =
+    selectedStartOffset < 0 ? selectedWidth : firstStart - start
+  const endGap =
+    selectedStartOffset < 0 ? selectedWidth : effectiveEnd - lastEnd
+  const prefix = startWasPartial
+    ? renderFittingPrefix(ellipsis, startGap)
+    : { text: '', width: 0 }
+  const suffix = endWasPartial
+    ? renderFittingPrefix(ellipsis, endGap)
+    : { text: '', width: 0 }
+
+  if (prefix.width + selectedContentWidth + suffix.width > selectedWidth) {
+    return ''
+  }
+  return (
+    prefix.text +
+    (selectedStartOffset < 0
+      ? ''
+      : source.render(selectedStartOffset, selectedEndOffset)) +
+    suffix.text
+  )
+}
+
 export function sliceByWidth(
   text: string,
   startWidth: number,
@@ -104,6 +199,10 @@ export function sliceByWidth(
   if (endWidth !== undefined) {
     assertWidth(endWidth, 'endWidth', { allowZero: true, allowNegative: true })
   }
+  if (options?.countAnsiEscapeCodes ?? false) {
+    assertSafeCountedAnsiHelperInput(options?.ellipsis ?? '')
+  }
+  const ellipsisHasAnsi = hasAnsi(options?.ellipsis ?? '')
   if (text === '') return ''
 
   if (isPrintableAsciiOnly(text)) {
@@ -116,21 +215,60 @@ export function sliceByWidth(
     return start >= end ? '' : text.slice(start, end)
   }
 
-  if (
-    startWidth >= 0 &&
-    (endWidth === undefined || endWidth >= 0) &&
-    !hasAnsi(text)
-  ) {
-    return slicePlainTextByWidth(
+  const containsAnsi = hasAnsi(text)
+  const finalize = (output: string): string =>
+    containsAnsi || ellipsisHasAnsi ? finalizeAnsiOutput(output) : output
+  if (!containsAnsi) {
+    if (startWidth < 0 || (endWidth !== undefined && endWidth < 0)) {
+      const totalWidth = stringWidth(text, options)
+      const start =
+        startWidth < 0 ? Math.max(0, totalWidth + startWidth) : startWidth
+      const requestedEnd = endWidth ?? totalWidth
+      const end = Math.min(
+        totalWidth,
+        requestedEnd < 0
+          ? Math.max(0, totalWidth + requestedEnd)
+          : requestedEnd
+      )
+      return finalize(slicePlainTextByWidth(text, start, end, options))
+    }
+    return finalize(slicePlainTextByWidth(
       text,
       startWidth,
       endWidth ?? Number.POSITIVE_INFINITY,
       options
-    )
+    ))
   }
 
-  const source = new TokenizedText(text, options)
-  const totalWidth = source.width
+  if (options?.countAnsiEscapeCodes ?? false) {
+    assertSafeCountedAnsiHelperInput(text)
+  }
+
+  if (!(options?.countAnsiEscapeCodes ?? false)) {
+    const sparseSource = new AnsiTextView(text)
+    if (startWidth < 0 || (endWidth !== undefined && endWidth < 0)) {
+      const totalWidth = stringWidth(sparseSource.plainText, options)
+      const start =
+        startWidth < 0 ? Math.max(0, totalWidth + startWidth) : startWidth
+      const requestedEnd = endWidth ?? totalWidth
+      const end = Math.min(
+        totalWidth,
+        requestedEnd < 0
+          ? Math.max(0, totalWidth + requestedEnd)
+          : requestedEnd
+      )
+      if (start >= end || start >= totalWidth) return ''
+      return finalize(sliceSparseAnsiByWidth(sparseSource, start, end, options))
+    }
+    return finalize(sliceSparseAnsiByWidth(
+      sparseSource,
+      startWidth,
+      endWidth ?? Number.POSITIVE_INFINITY,
+      options
+    ))
+  }
+
+  const totalWidth = stringWidth(text, options)
   const start = startWidth < 0 ? Math.max(0, totalWidth + startWidth) : startWidth
   const requestedEnd = endWidth ?? totalWidth
   const end = Math.min(
@@ -138,6 +276,7 @@ export function sliceByWidth(
     requestedEnd < 0 ? Math.max(0, totalWidth + requestedEnd) : requestedEnd
   )
   if (start >= end || start >= totalWidth) return ''
+  const source = new TokenizedText(text, options, { tokenWidthLimit: end })
 
   let currentWidth = 0
   let firstIndex = -1
@@ -174,30 +313,37 @@ export function sliceByWidth(
     ? renderFittingPrefix(ellipsis, startGap)
     : { text: '', width: 0 }
   let contentEnd = lastIndex + 1
-  let content = firstIndex < 0 ? '' : source.render(firstIndex, contentEnd)
   const suffix = endWasPartial
     ? renderFittingPrefix(ellipsis, endGap)
     : { text: '', width: 0 }
 
-  let result = prefix.text + content + suffix.text
   if (
     prefix.text === '' &&
     suffix.text === '' &&
     !source.options.countAnsiEscapeCodes
   ) {
-    return result
+    return finalize(prefix.text +
+      (firstIndex < 0 ? '' : source.render(firstIndex, contentEnd)) +
+      suffix.text)
   }
 
-  let resultWidth = stringWidth(result, source.options)
+  let resultWidth =
+    prefix.width +
+    (firstIndex < 0 ? 0 : source.renderWidth(firstIndex, contentEnd)) +
+    suffix.width
   while (
     firstIndex >= 0 &&
     contentEnd > firstIndex &&
     resultWidth > end - start
   ) {
     contentEnd--
-    content = source.render(firstIndex, contentEnd)
-    result = prefix.text + content + suffix.text
-    resultWidth = stringWidth(result, source.options)
+    resultWidth =
+      prefix.width + source.renderWidth(firstIndex, contentEnd) + suffix.width
   }
-  return resultWidth <= end - start ? result : ''
+  if (resultWidth > end - start) return ''
+  return finalize(
+    prefix.text +
+    (firstIndex < 0 ? '' : source.render(firstIndex, contentEnd)) +
+    suffix.text
+  )
 }

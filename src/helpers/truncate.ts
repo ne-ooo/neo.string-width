@@ -1,5 +1,13 @@
 import { hasAnsi } from '@lpm.dev/neo.ansi'
-import { TokenizedText, assertWidth, isWhitespaceToken } from '../core/ansi-text.js'
+import {
+  AnsiTextView,
+  TokenizedText,
+  assertSafeCountedAnsiHelperInput,
+  assertWidth,
+  finalizeAnsiOutput,
+  isWhitespaceToken,
+} from '../core/ansi-text.js'
+import { isPrintableAsciiOnly } from '../core/constants.js'
 import { GraphemeIterator } from '../core/grapheme-iterator.js'
 import {
   getGraphemeWidth,
@@ -12,6 +20,57 @@ const DEFAULT_OPTIONS = {
   position: 'end' as const,
   ellipsis: '…',
   wordBoundary: false,
+}
+
+function truncatePrintableText(
+  plain: string,
+  originalText: string,
+  width: number,
+  options: TruncateOptions &
+    Required<Pick<TruncateOptions, 'position' | 'wordBoundary'>>,
+  renderPrefix: (end: number) => string,
+  renderSuffix: (start: number, prefixEnd: number) => string
+): string {
+  const ellipsis = new TokenizedText(options.ellipsis ?? '', options)
+  const ellipsisTooWide = ellipsis.renderWidth() > width
+  const renderedEllipsis = renderPrefixWithin(ellipsis, width)
+  if (plain.length <= width) return originalText
+  if (ellipsisTooWide) return renderedEllipsis.text
+
+  const availableWidth = width - renderedEllipsis.width
+  if (options.position === 'start') {
+    let start = Math.max(0, plain.length - availableWidth)
+    if (options.wordBoundary) {
+      const whitespace = plain.indexOf(' ', start)
+      if (whitespace >= 0) start = whitespace
+    }
+    return renderedEllipsis.text + renderSuffix(start, -1)
+  }
+
+  if (options.position === 'middle') {
+    const prefixWidth = Math.floor(availableWidth / 2)
+    const suffixWidth = availableWidth - prefixWidth
+    let end = Math.min(prefixWidth, plain.length)
+    let start = Math.max(end, plain.length - suffixWidth)
+    if (options.wordBoundary) {
+      const prefixWhitespace = plain.lastIndexOf(' ', end - 1)
+      if (prefixWhitespace > 0) end = prefixWhitespace
+      const suffixWhitespace = plain.indexOf(' ', start)
+      if (suffixWhitespace >= 0) start = suffixWhitespace
+    }
+    return (
+      renderPrefix(end) +
+      renderedEllipsis.text +
+      renderSuffix(start, end)
+    )
+  }
+
+  let end = Math.min(availableWidth, plain.length)
+  if (options.wordBoundary) {
+    const whitespace = plain.lastIndexOf(' ', end - 1)
+    if (whitespace > 0) end = whitespace
+  }
+  return renderPrefix(end) + renderedEllipsis.text
 }
 
 function prefixEnd(text: TokenizedText, width: number): number {
@@ -37,16 +96,27 @@ function suffixStart(text: TokenizedText, width: number): number {
   return start
 }
 
+function prefixWordBoundary(text: TokenizedText, end: number): number {
+  let firstContent = 0
+  while (firstContent < end && text.tokens[firstContent]!.ansiOnly) {
+    firstContent++
+  }
+  for (let index = end - 1; index > firstContent; index--) {
+    if (isWhitespaceToken(text.tokens[index]!)) return index
+  }
+  return end
+}
+
+function suffixWordBoundary(text: TokenizedText, start: number): number {
+  for (let index = start; index < text.tokens.length; index++) {
+    if (isWhitespaceToken(text.tokens[index]!)) return index
+  }
+  return start
+}
+
 interface RenderedPrefix {
   readonly text: string
   readonly width: number
-}
-
-interface PlainToken {
-  readonly text: string
-  readonly width: number
-  readonly whitespace: boolean
-  readonly index: number
 }
 
 function renderPrefixWithin(text: TokenizedText, width: number): RenderedPrefix {
@@ -56,6 +126,43 @@ function renderPrefixWithin(text: TokenizedText, width: number): RenderedPrefix 
     text: text.render(0, end),
     width: text.renderWidth(0, end),
   }
+}
+
+interface PlainSuffixStart {
+  readonly offset: number
+  readonly tokenIndex: number
+}
+
+function findPlainSuffixStart(
+  text: string,
+  totalWidth: number,
+  width: number,
+  options: ReturnType<typeof resolveStringWidthOptions>,
+  minimumTokenIndex: number,
+  wordBoundary: boolean
+): PlainSuffixStart {
+  let remainingWidth = totalWidth
+  let offset = 0
+  let tokenIndex = 0
+
+  for (const segment of new GraphemeIterator(text).segments()) {
+    if (remainingWidth > width) {
+      remainingWidth -= getGraphemeWidth(segment.segment, options)
+      offset = segment.end
+      tokenIndex++
+      continue
+    }
+    if (tokenIndex < minimumTokenIndex) {
+      offset = segment.end
+      tokenIndex++
+      continue
+    }
+    if (!wordBoundary) return { offset, tokenIndex }
+    if (/^\s+$/u.test(segment.segment)) {
+      return { offset: segment.index, tokenIndex }
+    }
+  }
+  return { offset, tokenIndex }
 }
 
 function truncatePlainText(
@@ -75,88 +182,170 @@ function truncatePlainText(
     options.position === 'middle'
       ? availableWidth - prefixLimit
       : availableWidth
-  const prefix: PlainToken[] = []
-  const suffix: PlainToken[] = []
+  const keepPrefix = options.position !== 'start'
   let prefixWidth = 0
-  let suffixWidth = 0
+  let prefixEndOffset = 0
+  let prefixTokenCount = 0
+  let prefixWordBoundaryOffset = -1
   let totalWidth = 0
   let prefixClosed = false
   let tokenIndex = 0
 
-  for (const segment of new GraphemeIterator(text)) {
-    const token: PlainToken = {
-      text: segment,
-      width: getGraphemeWidth(segment, resolved),
-      whitespace: /^\s+$/u.test(segment),
-      index: tokenIndex++,
-    }
-    totalWidth += token.width
+  for (const segment of new GraphemeIterator(text).segments()) {
+    const tokenWidth = getGraphemeWidth(segment.segment, resolved)
+    totalWidth += tokenWidth
 
-    if (!prefixClosed && prefixWidth + token.width <= prefixLimit) {
-      prefix.push(token)
-      prefixWidth += token.width
-    } else {
+    if (
+      keepPrefix &&
+      !prefixClosed &&
+      prefixWidth + tokenWidth <= prefixLimit
+    ) {
+      prefixWidth += tokenWidth
+      prefixEndOffset = segment.end
+      prefixTokenCount = tokenIndex + 1
+      if (tokenIndex > 0 && /^\s+$/u.test(segment.segment)) {
+        prefixWordBoundaryOffset = segment.index
+      }
+    } else if (keepPrefix) {
       prefixClosed = true
     }
-
-    suffix.push(token)
-    suffixWidth += token.width
-    while (suffix.length > 0 && suffixWidth > suffixLimit) {
-      suffixWidth -= suffix.shift()!.width
-    }
+    tokenIndex++
   }
 
   if (totalWidth <= width) return text
   if (ellipsisTooWide) return ellipsis.text
 
+  let effectivePrefixEnd = prefixEndOffset
+  if (options.wordBoundary && prefixWordBoundaryOffset >= 0) {
+    effectivePrefixEnd = prefixWordBoundaryOffset
+  }
+
+  if (options.position === 'end') {
+    return text.slice(0, effectivePrefixEnd) + ellipsis.text
+  }
+
+  const suffix = findPlainSuffixStart(
+    text,
+    totalWidth,
+    suffixLimit,
+    resolved,
+    options.position === 'middle' ? prefixTokenCount : 0,
+    options.wordBoundary ?? false
+  )
+  const suffixOffset = suffix.offset
+
   if (options.position === 'start') {
-    if (options.wordBoundary) {
-      const whitespace = suffix.findIndex((token) => token.whitespace)
-      if (whitespace >= 0) suffix.splice(0, whitespace)
+    return ellipsis.text + text.slice(suffixOffset)
+  }
+
+  return (
+    text.slice(0, effectivePrefixEnd) +
+    ellipsis.text +
+    text.slice(suffixOffset)
+  )
+}
+
+function truncateSparseAnsi(
+  source: AnsiTextView,
+  originalText: string,
+  width: number,
+  options: TruncateOptions &
+    Required<Pick<TruncateOptions, 'position' | 'wordBoundary'>>
+): string {
+  const ellipsis = new TokenizedText(options.ellipsis ?? '', options)
+  const ellipsisTooWide = ellipsis.renderWidth() > width
+  const renderedEllipsis = renderPrefixWithin(ellipsis, width)
+  const availableWidth = width - renderedEllipsis.width
+  const plain = source.plainText
+  const widthOptions = resolveStringWidthOptions(options)
+  const prefixLimit =
+    options.position === 'middle'
+      ? Math.floor(availableWidth / 2)
+      : availableWidth
+  const suffixLimit =
+    options.position === 'middle'
+      ? availableWidth - prefixLimit
+      : availableWidth
+  const keepPrefix = options.position !== 'start'
+  let prefixWidth = 0
+  let prefixEndOffset = 0
+  let prefixTokenCount = 0
+  let prefixWordBoundaryOffset = -1
+  let prefixClosed = false
+  let tokenIndex = 0
+  let totalWidth = 0
+
+  for (const segment of new GraphemeIterator(plain).segments()) {
+    const tokenWidth = getGraphemeWidth(segment.segment, widthOptions)
+    totalWidth += tokenWidth
+    if (
+      keepPrefix &&
+      !prefixClosed &&
+      prefixWidth + tokenWidth <= prefixLimit
+    ) {
+      prefixWidth += tokenWidth
+      prefixEndOffset = segment.end
+      prefixTokenCount = tokenIndex + 1
+      if (tokenIndex > 0 && /^\s+$/u.test(segment.segment)) {
+        prefixWordBoundaryOffset = segment.index
+      }
+    } else if (keepPrefix) {
+      prefixClosed = true
     }
-    let result = ellipsis.text + suffix.map((token) => token.text).join('')
-    while (suffix.length > 0 && stringWidth(result, resolved) > width) {
-      suffix.shift()
-      result = ellipsis.text + suffix.map((token) => token.text).join('')
-    }
-    return result
+    tokenIndex++
+  }
+
+  if (totalWidth <= width) return originalText
+  if (ellipsisTooWide) return renderedEllipsis.text
+
+  let effectivePrefixEnd = prefixEndOffset
+  if (options.wordBoundary && prefixWordBoundaryOffset >= 0) {
+    effectivePrefixEnd = prefixWordBoundaryOffset
+  }
+  const inclusiveBoundaries = {
+    includeStartSequences: true,
+    includeEndSequences: true,
+  }
+
+  if (options.position === 'start') {
+    const suffix = findPlainSuffixStart(
+      plain,
+      totalWidth,
+      suffixLimit,
+      widthOptions,
+      0,
+      options.wordBoundary
+    )
+    return (
+      renderedEllipsis.text +
+      source.render(suffix.offset, plain.length, inclusiveBoundaries)
+    )
   }
 
   if (options.position === 'middle') {
-    const prefixEnd = prefix.length
-    while (suffix.length > 0 && suffix[0]!.index < prefixEnd) suffix.shift()
-    let result =
-      prefix.map((token) => token.text).join('') +
-      ellipsis.text +
-      suffix.map((token) => token.text).join('')
-    while (
-      stringWidth(result, resolved) > width &&
-      (prefix.length > 0 || suffix.length > 0)
-    ) {
-      if (prefix.length > 0) prefix.pop()
-      else suffix.shift()
-      result =
-        prefix.map((token) => token.text).join('') +
-        ellipsis.text +
-        suffix.map((token) => token.text).join('')
+    const suffix = findPlainSuffixStart(
+      plain,
+      totalWidth,
+      suffixLimit,
+      widthOptions,
+      prefixTokenCount,
+      options.wordBoundary
+    )
+    const suffixBoundaries = {
+      includeStartSequences: suffix.offset !== effectivePrefixEnd,
+      includeEndSequences: true,
     }
-    return result
+    return (
+      source.render(0, effectivePrefixEnd, inclusiveBoundaries) +
+      renderedEllipsis.text +
+      source.render(suffix.offset, plain.length, suffixBoundaries)
+    )
   }
 
-  if (options.wordBoundary) {
-    for (let index = prefix.length - 1; index > 0; index--) {
-      if (prefix[index]!.whitespace) {
-        prefix.splice(index)
-        break
-      }
-    }
-  }
-  let result = prefix.map((token) => token.text).join('') + ellipsis.text
-  while (prefix.length > 0 && stringWidth(result, resolved) > width) {
-    prefix.pop()
-    result = prefix.map((token) => token.text).join('') + ellipsis.text
-  }
-  return result
+  return (
+    source.render(0, effectivePrefixEnd, inclusiveBoundaries) +
+    renderedEllipsis.text
+  )
 }
 
 export function truncateToWidth(
@@ -165,25 +354,78 @@ export function truncateToWidth(
   options?: TruncateOptions
 ): string {
   assertWidth(width, 'width', { allowZero: true })
-  const resolved = { ...DEFAULT_OPTIONS, ...options }
-  if (!hasAnsi(text)) {
+  const resolved = {
+    ...options,
+    position: options?.position ?? DEFAULT_OPTIONS.position,
+    ellipsis: options?.ellipsis ?? DEFAULT_OPTIONS.ellipsis,
+    wordBoundary: options?.wordBoundary ?? DEFAULT_OPTIONS.wordBoundary,
+  }
+  const textHasAnsi = hasAnsi(text)
+  const outputMayContainAnsi = textHasAnsi || hasAnsi(resolved.ellipsis)
+  const finalize = (output: string): string =>
+    outputMayContainAnsi ? finalizeAnsiOutput(output) : output
+  if (resolved.countAnsiEscapeCodes ?? false) {
+    assertSafeCountedAnsiHelperInput(resolved.ellipsis)
+  }
+  if (!textHasAnsi) {
+    if (isPrintableAsciiOnly(text)) {
+      return finalize(truncatePrintableText(
+        text,
+        text,
+        width,
+        resolved,
+        (end) => text.slice(0, end),
+        (start) => text.slice(start)
+      ))
+    }
     const ellipsis = new TokenizedText(resolved.ellipsis, resolved)
     const ellipsisTooWide = ellipsis.renderWidth() > width
-    return truncatePlainText(
+    return finalize(truncatePlainText(
       text,
       width,
       resolved,
       renderPrefixWithin(ellipsis, width),
       ellipsisTooWide
-    )
+    ))
   }
 
-  const source = new TokenizedText(text, resolved)
-  if (source.width <= width) return text
+  if (resolved.countAnsiEscapeCodes ?? false) {
+    assertSafeCountedAnsiHelperInput(text)
+  }
+
+  if (!(resolved.countAnsiEscapeCodes ?? false)) {
+    const sparseSource = new AnsiTextView(text)
+    if (isPrintableAsciiOnly(sparseSource.plainText)) {
+      const inclusiveBoundaries = {
+        includeStartSequences: true,
+        includeEndSequences: true,
+      }
+      return finalize(truncatePrintableText(
+        sparseSource.plainText,
+        text,
+        width,
+        resolved,
+        (end) => sparseSource.render(0, end, inclusiveBoundaries),
+        (start, prefixEnd) =>
+          sparseSource.render(start, sparseSource.plainText.length, {
+            includeStartSequences: start !== prefixEnd,
+            includeEndSequences: true,
+          })
+      ))
+    }
+    return finalize(truncateSparseAnsi(sparseSource, text, width, resolved))
+  }
+
+  if (stringWidth(text, resolved) <= width) return finalize(text)
+  const source = new TokenizedText(
+    text,
+    resolved,
+    resolved.position === 'end' ? { tokenWidthLimit: width } : undefined
+  )
 
   const ellipsis = new TokenizedText(resolved.ellipsis, resolved)
   if (ellipsis.renderWidth() > width) {
-    return renderPrefixWithin(ellipsis, width).text
+    return finalize(renderPrefixWithin(ellipsis, width).text)
   }
   const renderedEllipsis = renderPrefixWithin(ellipsis, width)
 
@@ -191,19 +433,15 @@ export function truncateToWidth(
   if (resolved.position === 'start') {
     let start = suffixStart(source, availableWidth)
     if (resolved.wordBoundary) {
-      for (let index = start; index < source.tokens.length; index++) {
-        if (isWhitespaceToken(source.tokens[index]!)) {
-          start = index
-          break
-        }
-      }
+      start = suffixWordBoundary(source, start)
     }
-    let result = renderedEllipsis.text + source.render(start)
-    while (start < source.tokens.length && stringWidth(result, resolved) > width) {
+    while (
+      start < source.tokens.length &&
+      renderedEllipsis.width + source.renderWidth(start) > width
+    ) {
       start++
-      result = renderedEllipsis.text + source.render(start)
     }
-    return result
+    return finalize(renderedEllipsis.text + source.render(start))
   }
 
   if (resolved.position === 'middle') {
@@ -211,30 +449,32 @@ export function truncateToWidth(
     const endWidth = availableWidth - startWidth
     let end = prefixEnd(source, startWidth)
     let start = Math.max(end, suffixStart(source, endWidth))
-    let result =
-      source.render(0, end) + renderedEllipsis.text + source.render(start)
-    while (stringWidth(result, resolved) > width && (end > 0 || start < source.tokens.length)) {
+    if (resolved.wordBoundary) {
+      end = prefixWordBoundary(source, end)
+      start = suffixWordBoundary(source, start)
+    }
+    while (
+      source.renderWidth(0, end) +
+        renderedEllipsis.width +
+        source.renderWidth(start) >
+        width &&
+      (end > 0 || start < source.tokens.length)
+    ) {
       if (end > 0) end--
       else start++
-      result =
-        source.render(0, end) + renderedEllipsis.text + source.render(start)
     }
-    return result
+    return finalize(
+      source.render(0, end) + renderedEllipsis.text + source.render(start)
+    )
   }
 
   let end = prefixEnd(source, availableWidth)
-  if (resolved.wordBoundary) {
-    for (let index = end - 1; index > 0; index--) {
-      if (isWhitespaceToken(source.tokens[index]!)) {
-        end = index
-        break
-      }
-    }
-  }
-  let result = source.render(0, end) + renderedEllipsis.text
-  while (end > 0 && stringWidth(result, resolved) > width) {
+  if (resolved.wordBoundary) end = prefixWordBoundary(source, end)
+  while (
+    end > 0 &&
+    source.renderWidth(0, end) + renderedEllipsis.width > width
+  ) {
     end--
-    result = source.render(0, end) + renderedEllipsis.text
   }
-  return result
+  return finalize(source.render(0, end) + renderedEllipsis.text)
 }
